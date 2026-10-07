@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Digital Twin What If</title>
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bitter:wght@500;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --bg:#f1f3f5; --surface:#ffffff; --ink:#18202a; --ink-2:#465262; --muted:#6c7888; --line:#d9dfe6; --grid:#eceff3;
+  --accent:#1e5f8e; --accent-soft:#e2edf6; --warn:#a86a00; --ring:#ffffff;
+  /* damage states: DS0 neutral, DS1-4 one ordinal hue; on dark the ramps run dark->light so more damage stands out (both validated) */
+  --ds0:#a8a69f; --ds1:#ec9560; --ds2:#d9652f; --ds3:#b03d18; --ds4:#6e1a0a;
+  /* EF zones: one sequential blue */
+  --ef0:#b7d3f6; --ef1:#6da7ec; --ef2:#2a78d6; --ef3:#104281;
+  /* residual: blue (less damage than predicted) <-> gray <-> red (more) */
+  --rn3:#104281; --rn2:#2a78d6; --rn1:#86b6ef; --r0:#cfcdc6; --rp1:#f2a7a0; --rp2:#e34948; --rp3:#9e2323;
+  --s1:#2a78d6; --s2:#eb6834;
+  --obs:#8a8780;
+  /* demolition: status colours (always with a label) */ --dm2:#d03b3b; --dm1:#fab219; --dm0:#c9c7bf;
+  --sans:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --serif:Bitter,Georgia,serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){ --bg:#0e1216; --surface:#161c22; --ink:#e7ecf1; --ink-2:#b3bdc8; --muted:#8793a0; --line:#28313a; --grid:#1f262e;
+    --accent:#7fb6e0; --accent-soft:#1b2833; --warn:#e2a93a; --ring:#11161c;
+    --ds0:#77756e; --ds1:#b8441c; --ds2:#de6331; --ds3:#ef9563; --ds4:#f7c4a2;
+    --ef0:#1c5cab; --ef1:#2a78d6; --ef2:#5598e7; --ef3:#9ec5f4;
+    --rn3:#9ec5f4; --rn2:#3987e5; --rn1:#1c5cab; --r0:#5a5955; --rp1:#9e2323; --rp2:#e34948; --rp3:#f2a7a0;
+    --s1:#3987e5; --s2:#d95926; color-scheme:dark; }
+}
+:root[data-theme="dark"]{ --bg:#0e1216; --surface:#161c22; --ink:#e7ecf1; --ink-2:#b3bdc8; --muted:#8793a0; --line:#28313a; --grid:#1f262e;
+  --accent:#7fb6e0; --accent-soft:#1b2833; --warn:#e2a93a; --ring:#11161c;
+  --ds0:#77756e; --ds1:#b8441c; --ds2:#de6331; --ds3:#ef9563; --ds4:#f7c4a2;
+    --ef0:#1c5cab; --ef1:#2a78d6; --ef2:#5598e7; --ef3:#9ec5f4;
+    --rn3:#9ec5f4; --rn2:#3987e5; --rn1:#1c5cab; --r0:#5a5955; --rp1:#9e2323; --rp2:#e34948; --rp3:#f2a7a0;
+  --s1:#3987e5; --s2:#d95926; color-scheme:dark; }
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
+.wrap{display:flex;flex-direction:column;min-height:100%;max-width:1500px;margin:0 auto;padding:12px 16px 24px;gap:10px}
+header{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:flex-end;justify-content:space-between}
+.eyebrow{margin:0;font:600 11px/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{margin:2px 0 0;font:700 24px/1.2 var(--serif)}
+.sub{margin:2px 0 0;color:var(--ink-2);font-size:13px}
+.meta{font:12px var(--mono);color:var(--muted)}
+.controls{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 10px;font-size:12.5px;color:var(--ink-2);cursor:pointer;user-select:none}
+.chip input{margin:0;accent-color:var(--accent)}
+.chip select{font:inherit;border:0;background:transparent;color:var(--ink);padding:0}
+main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:10px;min-height:0}
+#map{height:min(76vh,1400px);min-height:420px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;height:min(76vh,1400px);min-height:420px}
+@media (max-width:900px){ main{grid-template-columns:1fr} #map{height:62vh} .panel{height:auto} }
+.panel h2{margin:0 0 6px;font:700 17px/1.3 var(--serif)}
+.panel h3{margin:16px 0 6px;font:600 12px/1.2 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.headline{font-size:15px;margin:0 0 10px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{border:1px solid var(--line);border-radius:8px;padding:8px}
+.stat b{display:block;font:600 20px/1.1 var(--sans)}
+.stat span{font-size:11.5px;color:var(--muted)}
+.loop{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.loop li{display:grid;grid-template-columns:22px 1fr;gap:6px;align-items:start}
+.loop .ic{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 11px var(--sans);color:#fff;margin-top:1px}
+.ic.done{background:#0ca30c}.ic.blocked{background:#d03b3b}.ic.started{background:#1e5f8e}.ic.todo{background:var(--muted)}
+.loop b{font-weight:600}.loop p{margin:0;color:var(--ink-2);font-size:12.5px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:4px 6px;border-bottom:1px solid var(--grid);text-align:right;font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;color:var(--muted);font-size:11.5px}
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0;font-size:13px}
+dl.kv dt{color:var(--muted)} dl.kv dd{margin:0}
+.back{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:6px;padding:3px 10px;font:inherit;font-size:12.5px;cursor:pointer}
+.legend{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.35;max-width:220px}
+.legend b{display:block;font-weight:600;margin-bottom:4px}
+.legend .row{display:flex;align-items:center;gap:6px}
+.sw{width:11px;height:11px;border-radius:50%;flex:none;border:1px solid var(--ring)}
+.sw.sq{border-radius:2px}
+.sw.hollow{background:transparent!important;border:1.5px solid var(--muted)}
+.leaflet-container{font:inherit;background:var(--bg)}
+.leaflet-tooltip{background:var(--surface);color:var(--ink);border:1px solid var(--line);box-shadow:0 2px 8px rgba(0,0,0,.15);font-size:12px}
+.chart{width:100%;height:auto;display:block}
+.chart text{font:11px var(--sans);fill:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-bottom:6px}
+.seg button{border:0;background:var(--surface);color:var(--ink-2);font:inherit;font-size:12px;padding:3px 9px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+.pair figure{margin:0}.pair canvas{width:100%;aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--grid);display:block}
+.pair figcaption{font-size:11.5px;color:var(--muted);margin-top:2px}
+.tip{position:fixed;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:2000}
+details.about{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 16px}
+details.about summary{cursor:pointer;font-weight:600}
+details.about p{color:var(--ink-2);max-width:900px}
+a{color:var(--accent)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line)}
+.tabs a{padding:7px 16px;font-weight:600;font-size:14px;color:var(--ink-2);text-decoration:none;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink);background:var(--surface)}
+.tabs a[aria-current="page"]{color:var(--ink);background:var(--surface);border-color:var(--line)}
+
+#status{padding:20px;color:var(--muted)}
+#status pre{white-space:pre-wrap;color:var(--warn);font:12px var(--mono)}
+#gate{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:5000;padding:16px}
+#gate form{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;display:grid;gap:10px;width:min(360px,100%)}
+#gate input[type=password]{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+#gate button{font:inherit;font-weight:600;padding:8px;border:0;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer}
+.wf-grid{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:10px}
+@media (max-width:900px){ .wf-grid{grid-template-columns:1fr} }
+.slider{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 14px;font-size:12.5px;color:var(--ink-2)}
+.slider input{width:220px;accent-color:var(--accent)}
+.slider output{font:600 13px var(--sans);color:var(--ink);min-width:3.5em}
+.seg2{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.seg2 button{border:0;background:var(--surface);color:var(--ink-2);font:inherit;font-size:12.5px;padding:4px 11px;cursor:pointer}
+.seg2 button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.hero{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
+.hero .stat b{font-size:22px}
+.callout{border-left:3px solid var(--warn);padding:4px 10px;margin:8px 0;color:var(--ink-2);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <p class="eyebrow">Penn State Heritage 3D Lab · Digital Twin Hub</p>
+      <h1 id="title">Digital twin, what if</h1>
+      <p class="sub" id="subtitle"></p>
+    </div>
+    <div class="meta" id="meta"></div>
+  </header>
+  <nav class="tabs" aria-label="Views">
+    <a href="./">Map</a>
+    <a href="3d.html">3D</a>
+    <a href="whatif.html" aria-current="page">What if</a>
+  </nav>
+  <div class="controls" role="group" aria-label="Scenario">
+    <div class="seg2" role="group" aria-label="Fragility model">
+      <button type="button" data-m="incore" aria-pressed="true">IN-CORE curves (T6 / T19)</button>
+      <button type="button" data-m="t20" aria-pressed="false">Historic masonry fit (T20)</button>
+    </div>
+    <label class="slider">Wind speed <input type="range" id="f" min="-40" max="40" step="5" value="0" aria-label="Change in wind speed, percent"> <output id="fo">as it was</output></label>
+    <label class="chip">Buildings <select id="color" aria-label="Color buildings by">
+      <option value="exp">expected damage in this scenario</option>
+      <option value="chg">change from the real tornado's model</option>
+    </select></label>
+  </div>
+  <div id="status">Loading…</div>
+  <div class="wf-grid">
+    <div id="map" role="application" aria-label="Map"></div>
+    <aside class="panel" id="panel" aria-label="Scenario results"></aside>
+  </div>
+  <details class="about">
+    <summary>About these scenarios</summary>
+    <div id="about"></div>
+    <p><button class="back" id="forget" type="button">Forget this device (sign out)</button></p>
+  </details>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ---------------------------------------------------------------- data access (plain in dev, AES-GCM behind the gate when published)
+let KEY = null, FORGET = null;
+const DATA = "data/";
+async function getBuf(name){
+  const url = DATA + name + (KEY ? ".enc" : "");
+  let res = await fetch(url);
+  if (res.status >= 500){ console.warn(`${url}: HTTP ${res.status}, retrying once`); await new Promise(r => setTimeout(r, 600)); res = await fetch(url); }
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  const buf = await res.arrayBuffer();
+  if (!KEY) return buf;
+  const u = new Uint8Array(buf);
+  try { return await crypto.subtle.decrypt({name:"AES-GCM", iv:u.slice(0,12)}, KEY, u.slice(12)); }
+  catch(e){ throw new Error(`${url}: decrypt failed (${e.name})`); }
+}
+const getJSON = async n => JSON.parse(new TextDecoder().decode(await getBuf(n)));
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const dark = () => document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+const DSN = ["DS0 none", "DS1 slight", "DS2 moderate", "DS3 extensive", "DS4 complete"];
+
+let S, B, M, map, base, canvas, legendCtl, L_B, L_EF, N, model = "incore", F = 1;
+
+// ---------------------------------------------------------------- fragility: P(DS = k) for wind uniform over an EF band scaled by F
+function erf(x){ const t = 1 / (1 + 0.3275911 * Math.abs(x)), y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; }
+const lncdf = (w, med, b) => 0.5 * (1 + erf(Math.log(w / med) / (b * Math.SQRT2)));
+function pmf(curve, ef, f){
+  const c = M.frag[curve], [lo, hi] = M.ef_ranges[ef], n = 400, exc = [0, 0, 0, 0];
+  for (let i = 0; i < n; i++){ const w = (lo + (hi - lo) * (i + 0.5) / n) * f; for (let k = 0; k < 4; k++) exc[k] += lncdf(w, c.median_mph[k], c.beta[k]) / n; }
+  return [1 - exc[0], exc[0] - exc[1], exc[1] - exc[2], exc[2] - exc[3], exc[3]].map(p => Math.max(0, p));
+}
+const curveOf = (arch, m) => m === "t20" ? "t20" : "t" + arch;
+const mean = p => p.reduce((s, v, k) => s + v * k, 0);
+let cache = {};
+function P(arch, ef, m, f){ const k = `${m}|${arch}|${ef}|${f}`; return cache[k] || (cache[k] = pmf(curveOf(arch, m), ef, f)); }
+
+// ---------------------------------------------------------------- scenario
+function scenario(m, f){
+  const c = B.cols, exp = new Float32Array(c.lat.length).fill(NaN), counts = [0, 0, 0, 0, 0]; let n = 0;
+  for (let i = 0; i < c.lat.length; i++){
+    if (c.ef[i] < 0) continue;
+    const p = P(c.arch[i], c.ef[i], m, f); exp[i] = mean(p); n++;
+    for (let k = 0; k < 5; k++) counts[k] += p[k];
+  }
+  return {exp, counts, n};
+}
+function observed(){
+  const c = B.cols, counts = [0, 0, 0, 0, 0];
+  for (let i = 0; i < c.lat.length; i++) if (c.ef[i] >= 0 && c.ds[i] >= 0) counts[c.ds[i]]++;
+  return counts;
+}
+let SC, BASE, OBS;
+function run(){
+  SC = scenario(model, F); BASE = scenario(model, 1);
+  draw(); renderPanel();
+}
+
+// ---------------------------------------------------------------- map
+function binExp(v){ return v < 0.5 ? 0 : v < 1.5 ? 1 : v < 2.5 ? 2 : v < 3.5 ? 3 : 4; }
+function colorOf(i){
+  const v = SC.exp[i]; if (!isFinite(v)) return null;
+  if ($("color").value === "exp") return css("--ds" + binExp(v));
+  const d = v - BASE.exp[i];
+  return css(d <= -1 ? "--rn3" : d <= -0.33 ? "--rn1" : d < 0.33 ? "--r0" : d < 1 ? "--rp1" : "--rp3");
+}
+function draw(){
+  L_B.clearLayers();
+  const c = B.cols, ring = css("--ring"), order = c.lat.map((_, i) => i).filter(i => isFinite(SC.exp[i])).sort((a, b) => SC.exp[a] - SC.exp[b]);
+  for (const i of order){
+    const col = colorOf(i);
+    const m = L.circleMarker([c.lat[i], c.lon[i]], {radius:4, weight:0.8, color:ring, fillColor:col, fillOpacity:0.95, renderer:canvas});
+    m.bindTooltip(() => `Expected ${SC.exp[i].toFixed(2)} DS (${DSN[binExp(SC.exp[i])]})<br>T${c.arch[i]} · EF${c.ef[i]} zone${c.ds[i] >= 0 ? " · observed " + DSN[c.ds[i]] : ""}`);
+    L_B.addLayer(m);
+  }
+  legend();
+}
+function legend(){
+  const row = (k, l) => `<div class="row"><span class="sw" style="background:${css(k)}"></span>${esc(l)}</div>`;
+  legendCtl.getContainer().innerHTML = $("color").value === "exp"
+    ? "<b>Expected damage (mean DS)</b>" + [0, 1, 2, 3, 4].map(k => row("--ds" + k, ["under 0.5", "0.5 to 1.5", "1.5 to 2.5", "2.5 to 3.5", "3.5 or more"][k] + " · " + DSN[k].split(" ")[1])).join("")
+    : "<b>Change from the real tornado (DS)</b>" + [["--rn3", "1 or more less"], ["--rn1", "⅓ to 1 less"], ["--r0", "about the same"], ["--rp1", "⅓ to 1 more"], ["--rp3", "1 or more more"]].map(([k, l]) => row(k, l)).join("");
+}
+
+// ---------------------------------------------------------------- panel: headline numbers, observed vs modelled chart, table
+function intensityText(){
+  const pct = Math.round((F - 1) * 100);
+  return pct === 0 ? "as it was" : (pct > 0 ? "+" : "") + pct + "%";
+}
+function equiv(){
+  // where the old EF2 and EF3 bands land on the EF scale after scaling
+  const ef = w => w < 86 ? "EF0" : w < 111 ? "EF1" : w < 136 ? "EF2" : w < 166 ? "EF3" : w < 201 ? "EF4" : "EF5";
+  return [2, 3].map(k => { const [lo, hi] = M.ef_ranges[k]; return `EF${k} zone: ${Math.round(lo * F)}–${Math.round(hi * F)} mph (${ef((lo + hi) / 2 * F)} winds)`; }).join(" · ");
+}
+function chart(){
+  const W = 360, H = 200, P = {l:40, r:8, t:12, b:30}, n = 5, gw = (W - P.l - P.r) / n, bw = (gw - 14) / 2;
+  const max = Math.max(...OBS, ...SC.counts) * 1.1, Y = v => P.t + (1 - v / max) * (H - P.t - P.b);
+  const tick = Math.pow(10, Math.floor(Math.log10(max))) * (max / Math.pow(10, Math.floor(Math.log10(max))) > 5 ? 2 : 1);
+  let g = "";
+  for (let v = 0; v <= max; v += tick) g += `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css("--grid")}"/><text x="${P.l - 5}" y="${Y(v) + 4}" text-anchor="end">${v.toLocaleString()}</text>`;
+  const bar = (x, v, col, kind, k) => { const y = Y(v), h = Math.max(0, Y(0) - y), r = Math.min(4, h / 2);
+    return `<path data-k="${k}" data-kind="${kind}" d="M${x},${Y(0)} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${Y(0)} Z" fill="${col}"/>`; };
+  for (let k = 0; k < n; k++){
+    const x = P.l + k * gw + 7;
+    g += bar(x, OBS[k], css("--obs"), "obs", k) + bar(x + bw + 2, SC.counts[k], css("--s1"), "mod", k);
+    g += `<text x="${x + bw + 1}" y="${H - 12}" text-anchor="middle">DS${k}</text>`;
+  }
+  g += `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="${css("--muted")}"/>`;
+  return `<svg class="chart" id="bars" viewBox="0 0 ${W} ${H}" role="img" aria-label="Buildings per damage state: observed on May 16, 2025 vs this scenario">${g}</svg>`;
+}
+function renderPanel(){
+  const pct = Math.round((F - 1) * 100), mdl = model === "t20" ? "historic masonry fit (T20)" : "IN-CORE curves";
+  const d34 = SC.counts[3] + SC.counts[4], d34b = BASE.counts[3] + BASE.counts[4], o34 = OBS[3] + OBS[4];
+  const fmt = v => Math.round(v).toLocaleString();
+  $("panel").innerHTML = `<h2>${pct === 0 ? "The real tornado" : `A tornado with ${Math.abs(pct)}% ${pct > 0 ? "stronger" : "weaker"} winds`}, ${esc(mdl)}</h2>
+    <p class="meta" style="margin:0 0 8px">${esc(equiv())}</p>
+    <div class="hero">
+      <div class="stat"><b>${fmt(SC.counts[4])}</b><span>expected destroyed (DS4)</span></div>
+      <div class="stat"><b>${fmt(d34)}</b><span>expected DS3 or worse</span></div>
+      <div class="stat"><b>${(SC.counts.reduce((s, v, k) => s + v * k, 0) / SC.n).toFixed(2)}</b><span>mean DS, ${SC.n.toLocaleString()} buildings</span></div>
+    </div>
+    <p style="margin:0 0 6px;color:var(--ink-2)">Field surveys after the real tornado found <b>${OBS[4].toLocaleString()}</b> destroyed and <b>${o34.toLocaleString()}</b> at DS3 or worse.
+      ${pct !== 0 ? `The same model at the real intensity gives ${fmt(BASE.counts[4])} and ${fmt(d34b)}.` : ""}</p>
+    <h3>Buildings per damage state</h3>
+    <div class="legend-inline" style="display:flex;gap:14px;font-size:12px;margin-bottom:4px">
+      <span><span class="sw sq" style="display:inline-block;background:${css("--obs")}"></span> Observed, May 16, 2025</span>
+      <span><span class="sw sq" style="display:inline-block;background:${css("--s1")}"></span> This scenario (expected)</span></div>
+    ${chart()}
+    <table style="margin-top:6px"><thead><tr><th>State</th><th>Observed</th><th>Scenario</th><th>Real-intensity model</th></tr></thead><tbody>
+      ${[0, 1, 2, 3, 4].map(k => `<tr><td>${DSN[k]}</td><td>${OBS[k].toLocaleString()}</td><td>${fmt(SC.counts[k])}</td><td>${fmt(BASE.counts[k])}</td></tr>`).join("")}</tbody></table>
+    ${model === "incore" ? `<p class="callout">${esc(S.whatif.incoreNote)}</p>` : `<p class="callout">${esc(S.whatif.t20Note)}</p>`}
+    <p class="meta">${esc(S.whatif.scope)}</p>`;
+  const svg = $("bars"), tip = $("tip");
+  svg.querySelectorAll("path[data-k]").forEach(p => {
+    p.onmousemove = e => { const k = +p.dataset.k; tip.hidden = false; tip.style.left = e.clientX + 12 + "px"; tip.style.top = e.clientY + 12 + "px";
+      tip.innerHTML = `<b>${DSN[k]}</b><br>Observed: ${OBS[k].toLocaleString()}<br>Scenario: ${fmt(SC.counts[k])}`; };
+    p.onmouseleave = () => tip.hidden = true;
+  });
+}
+
+// ---------------------------------------------------------------- boot
+function report(what, e){ const pre = document.createElement("pre"); pre.textContent = `Could not load ${what}\n${e && e.stack || e}`; $("status").replaceChildren(pre); $("status").hidden = false; }
+function setBase(){
+  for (const l of base || []) l.remove();
+  const svc = dark() ? "Canvas/World_Dark_Gray" : "Canvas/World_Light_Gray", u = s => `https://server.arcgisonline.com/ArcGIS/rest/services/${svc}_${s}/MapServer/tile/{z}/{y}/{x}`;
+  base = [L.tileLayer(u("Base"), {maxZoom:19, maxNativeZoom:16, attribution:"Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors"}).addTo(map),
+          L.tileLayer(u("Reference"), {maxZoom:19, maxNativeZoom:16, pane:"overlayPane", opacity:0.9}).addTo(map)];
+}
+async function boot(){
+  try {
+    [S, B, M, N] = await Promise.all(["site.json", "buildings.json", "model.json", "nws.json"].map(getJSON));
+    document.title = S.site.short + " What if"; $("title").textContent = S.whatif.title; $("subtitle").textContent = S.whatif.sub;
+    $("meta").textContent = `built ${M.generated}`;
+    $("about").innerHTML = S.whatif.about.map(t => `<p>${esc(t)}</p>`).join("");
+    // self-check: at the real intensity the IN-CORE scenario must reproduce the comparison table's PMFs
+    for (const s of M.strata){ const p = pmf(s.arch, s.ef, 1); if (p.some((v, k) => Math.abs(v - s.incore[k]) > 0.01)) throw new Error(`PMF check failed for ${s.arch} EF${s.ef}`); }
+    const q = (a, f) => { const v = a.slice().sort((x, y) => x - y); return v[Math.floor(f * (v.length - 1))]; };
+    map = L.map("map", {preferCanvas:true}).fitBounds([[q(B.cols.lat, .02), q(B.cols.lon, .02)], [q(B.cols.lat, .98), q(B.cols.lon, .98)]]);
+    canvas = L.canvas({padding:0.5}); setBase();
+    L_EF = L.layerGroup().addTo(map); L_B = L.layerGroup().addTo(map);
+    for (const p of N.polygons.slice().sort((a, b) => a.ef.localeCompare(b.ef))){ const k = +p.ef.replace("EF", ""); L.geoJSON(p.geom, {style:{color:css("--ef" + k), weight:1, fillColor:css("--ef" + k), fillOpacity:0.12}, interactive:false}).addTo(L_EF); }
+    legendCtl = L.control({position:"bottomright"}); legendCtl.onAdd = () => { const d = L.DomUtil.create("div", "legend"); L.DomEvent.disableClickPropagation(d); return d; }; legendCtl.addTo(map);
+    OBS = observed(); $("status").hidden = true; run();
+    document.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { model = b.dataset.m; document.querySelectorAll("[data-m]").forEach(x => x.setAttribute("aria-pressed", x === b)); run(); });
+    let t; $("f").oninput = e => { F = 1 + e.target.value / 100; $("fo").textContent = intensityText(); clearTimeout(t); t = setTimeout(run, 60); };
+    $("color").onchange = draw;
+    $("forget").onclick = async () => { if (FORGET) await FORGET(); location.reload(); };
+  } catch(e){ report("the scenarios", e); }
+}
+
+// ---------------------------------------------------------------- gate (published copy only; dev copy has no gate.json)
+(async function(){
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  let Gt = null;
+  try { const r = await fetch("gate.json"); if (r.ok) Gt = await r.json(); } catch(e){}
+  if (!Gt) return boot();
+  const gate = document.createElement("div"); gate.id = "gate";
+  gate.innerHTML = `<form id="gateform"><p class="eyebrow">Penn State Heritage 3D Lab</p><h1 style="font-size:22px">Digital twin</h1>
+    <label for="pw" class="sub">Enter the password to view.</label><input id="pw" type="password" autocomplete="current-password" required>
+    <label class="sub" style="display:flex;gap:8px;align-items:center"><input id="remember" type="checkbox" checked> Remember on this device for 30 days</label>
+    <button type="submit">View</button><p id="gatemsg" class="sub" role="alert" style="margin:0;min-height:1.2em"></p></form>`;
+  document.body.appendChild(gate); document.querySelector(".wrap").inert = true; $("pw").focus();
+  const tryKey = async k => { const u = b64(Gt.check); try { await crypto.subtle.decrypt({name:"AES-GCM", iv:u.slice(0,12)}, k, u.slice(12)); return true; } catch(e){ return false; } };
+  const open = k => { KEY = k; gate.remove(); document.querySelector(".wrap").inert = false; FORGET = idbDel; boot(); };
+  // "Remember" keeps a non-extractable CryptoKey in IndexedDB (never raw key bytes), expiring after 30 days.
+  // The store name is unique to this twin: every twin shares the rkn2.github.io origin.
+  const DB = "stl-twin";
+  const idb = () => new Promise((res, rej) => { const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => r.result.createObjectStore("k"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const idbGet = async () => { const db = await idb(); return new Promise(res => { const q = db.transaction("k").objectStore("k").get("key"); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); };
+  const idbPut = async v => { const db = await idb(); return new Promise(res => { const t = db.transaction("k", "readwrite"); t.objectStore("k").put(v, "key"); t.oncomplete = res; t.onerror = res; }); };
+  const idbDel = async () => { try { const db = await idb(); db.transaction("k", "readwrite").objectStore("k").delete("key"); } catch(e){} };
+  try { const s = await idbGet();
+    if (s && s.exp > Date.now() && s.salt === Gt.salt && await tryKey(s.key)) return open(s.key);
+    if (s) await idbDel(); } catch(e){}
+  $("gateform").addEventListener("submit", async e => {
+    e.preventDefault(); const msg = $("gatemsg"); msg.textContent = "Checking…";
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode($("pw").value.trim().toLowerCase()), "PBKDF2", false, ["deriveKey"]);
+    const k = await crypto.subtle.deriveKey({name:"PBKDF2", salt:b64(Gt.salt), iterations:Gt.iter, hash:"SHA-256"}, base, {name:"AES-GCM", length:256}, false, ["decrypt"]);
+    if (!(await tryKey(k))){ msg.textContent = "That password didn't work."; return; }
+    if ($("remember").checked){ try { await idbPut({key:k, salt:Gt.salt, exp:Date.now() + 30*864e5}); } catch(e){} }
+    open(k);
+  });
+})();
+</script>
+</body>
+</html>
