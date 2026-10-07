@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Digital Twin 3D</title>
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bitter:wght@500;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f1f3f5; --surface:#ffffff; --ink:#18202a; --ink-2:#465262; --muted:#6c7888; --line:#d9dfe6; --grid:#eceff3;
+  --accent:#1e5f8e; --accent-soft:#e2edf6; --warn:#a86a00; --stage:#11161c;
+  --sans:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --serif:Bitter,Georgia,serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){ --bg:#0e1216; --surface:#161c22; --ink:#e7ecf1; --ink-2:#b3bdc8; --muted:#8793a0; --line:#28313a; --grid:#1f262e;
+    --accent:#7fb6e0; --accent-soft:#1b2833; --warn:#e2a93a; color-scheme:dark; }
+}
+:root[data-theme="dark"]{ --bg:#0e1216; --surface:#161c22; --ink:#e7ecf1; --ink-2:#b3bdc8; --muted:#8793a0; --line:#28313a; --grid:#1f262e;
+  --accent:#7fb6e0; --accent-soft:#1b2833; --warn:#e2a93a; color-scheme:dark; }
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
+.wrap{display:flex;flex-direction:column;min-height:100%;max-width:1500px;margin:0 auto;padding:12px 16px 24px;gap:10px}
+header{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:flex-end;justify-content:space-between}
+.eyebrow{margin:0;font:600 11px/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{margin:2px 0 0;font:700 24px/1.2 var(--serif)}
+.sub{margin:2px 0 0;color:var(--ink-2);font-size:13px}
+.meta{font:12px var(--mono);color:var(--muted)}
+.controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 10px;font-size:12.5px;color:var(--ink-2);cursor:pointer;user-select:none}
+.chip select{font:inherit;border:0;background:transparent;color:var(--ink);padding:0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.seg button{border:0;background:var(--surface);color:var(--ink-2);font:inherit;font-size:12.5px;padding:4px 11px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+a.chip{text-decoration:none}
+main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:10px}
+.stage{position:relative;height:min(78vh,1400px);min-height:440px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--stage)}
+canvas#c{width:100%;height:100%;display:block;touch-action:none}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;height:min(78vh,1400px);min-height:440px}
+@media (max-width:900px){ main{grid-template-columns:1fr} .stage{height:62vh} .panel{height:auto} }
+.panel h2{margin:0 0 6px;font:700 17px/1.3 var(--serif)}
+.panel h3{margin:16px 0 6px;font:600 12px/1.2 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.panel p{margin:0 0 8px;color:var(--ink-2)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:4px 6px;border-bottom:1px solid var(--grid);text-align:right;font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;color:var(--muted);font-size:11.5px}
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0;font-size:13px}
+dl.kv dt{color:var(--muted)} dl.kv dd{margin:0}
+.back{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:6px;padding:3px 10px;font:inherit;font-size:12.5px;cursor:pointer}
+.legend{position:absolute;left:10px;bottom:10px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.35}
+.legend b{display:block;font-weight:600;margin-bottom:4px}
+.legend .row{display:flex;align-items:center;gap:6px}
+.sw{width:11px;height:11px;border-radius:2px;flex:none}
+.split{position:absolute;top:0;bottom:0;width:0;z-index:5;pointer-events:none}
+.split::before{content:"";position:absolute;top:0;bottom:0;left:-1px;width:2px;background:#fff;box-shadow:0 0 4px rgba(0,0,0,.6)}
+.split span{pointer-events:auto;cursor:ew-resize;position:absolute;top:calc(50% - 14px);left:-14px;width:28px;height:28px;border-radius:50%;background:#fff;color:#18202a;display:grid;place-items:center;font:700 13px var(--sans);box-shadow:0 1px 4px rgba(0,0,0,.4);touch-action:none}
+.split b{position:absolute;top:8px;font:600 11.5px var(--sans);color:#fff;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px;white-space:nowrap}
+.hint{position:absolute;right:10px;bottom:10px;font:11.5px var(--sans);color:#d5dbe1;background:rgba(0,0,0,.45);padding:3px 8px;border-radius:4px}
+details.about{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 16px}
+details.about summary{cursor:pointer;font-weight:600}
+details.about p{color:var(--ink-2);max-width:900px}
+a{color:var(--accent)}
+#status{position:absolute;inset:0;display:grid;place-items:center;color:#c9d1d9;font-size:13px}
+#status pre{white-space:pre-wrap;color:#e2a93a;font:12px var(--mono);max-width:90%}
+#gate{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:5000;padding:16px}
+#gate form{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;display:grid;gap:10px;width:min(360px,100%)}
+#gate input[type=password]{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+#gate button{font:inherit;font-weight:600;padding:8px;border:0;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"},
+ "integrity":{"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js":"sha384-61S/Nu32S3E5+n+KpCOTb2eRYps6fVKm+9Gz1QBvSePFthb46f063Aa/qe/lykFZ",
+  "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js":"sha384-qlO/ZugKPxAQUAvTlQoo0QECzxJIJySZmCF/DHdb2Xn/hHndFwX/vfUAC9Hbk6LP"}}</script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <p class="eyebrow">Penn State Heritage 3D Lab · Digital Twin Hub</p>
+      <h1 id="title">Digital twin, 3D</h1>
+      <p class="sub" id="subtitle"></p>
+    </div>
+    <div class="meta" id="meta"></div>
+  </header>
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Imagery">
+      <button type="button" data-img="0" aria-pressed="false">Before</button>
+      <button type="button" data-img="1" aria-pressed="false">After</button>
+      <button type="button" data-img="2" aria-pressed="true">Swipe</button>
+    </div>
+    <label class="chip">Walls <select id="wall" aria-label="Color walls by">
+      <option value="ds">observed damage</option>
+      <option value="demo">demolished since the tornado</option>
+      <option value="plain">plain</option>
+    </select></label>
+    <div class="seg" role="group" aria-label="Views">
+      <button type="button" data-view="oblique">Oblique</button>
+      <button type="button" data-view="top">Top down</button>
+      <button type="button" data-view="street">Low</button>
+    </div>
+    <a class="chip" href="./">← Map of the whole path</a>
+  </div>
+  <main>
+    <div class="stage" id="stage">
+      <canvas id="c" aria-label="3D model"></canvas>
+      <div class="split" id="split" hidden><b id="lb" style="right:10px"></b><b id="la" style="left:10px"></b><span aria-hidden="true">⇔</span></div>
+      <div class="legend" id="legend"></div>
+      <div class="hint">drag to orbit · right-drag to pan · scroll to zoom · click a building</div>
+      <div id="status">Loading…</div>
+    </div>
+    <aside class="panel" id="panel" aria-label="Details"></aside>
+  </main>
+  <details class="about">
+    <summary>About this model and its data</summary>
+    <div id="about"></div>
+    <p><button class="back" id="forget" type="button">Forget this device (sign out)</button></p>
+  </details>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// ---------------------------------------------------------------- data access (plain in dev, AES-GCM behind the gate when published)
+let KEY = null, FORGET = null;
+const DATA = "data/";
+async function getBuf(name){
+  const url = DATA + name + (KEY ? ".enc" : "");
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  const buf = await res.arrayBuffer();
+  if (!KEY) return buf;
+  const u = new Uint8Array(buf);
+  try { return await crypto.subtle.decrypt({name:"AES-GCM", iv:u.slice(0,12)}, KEY, u.slice(12)); }
+  catch(e){ throw new Error(`${url}: decrypt failed (${e.name})`); }
+}
+const getJSON = async n => JSON.parse(new TextDecoder().decode(await getBuf(n)));
+async function getTex(n){
+  const bmp = await createImageBitmap(new Blob([await getBuf(n)], {type:"image/jpeg"}), {imageOrientation:"flipY"});
+  const t = new THREE.Texture(bmp); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; return t;
+}
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const dark = () => document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+const DSN = ["DS0 none", "DS1 slight", "DS2 moderate", "DS3 extensive", "DS4 complete"];
+// validated ordinal ramp (light-mode steps: walls are lit 3D surfaces, not marks on a page surface)
+const DSC = [0xa8a69f, 0xec9560, 0xd9652f, 0xb03d18, 0x6e1a0a], NOSURV = 0xd8d6cf, DEMO = 0xd03b3b, KEEP = 0xc9c7bf;
+
+let S, T, NM, renderer, scene, camera, controls, mat, bMesh, faceB = [], sel = -1, mode = 2, split = 0.5;
+const canvas = $("c"), statusEl = $("status");
+
+// ---------------------------------------------------------------- scene
+function setup(){
+  renderer = new THREE.WebGLRenderer({canvas, antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  scene = new THREE.Scene(); scene.background = new THREE.Color(0x11161c);
+  camera = new THREE.PerspectiveCamera(40, 1, 1, 6000); camera.up.set(0, 0, 1);
+  controls = new OrbitControls(camera, canvas); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 20; controls.maxDistance = 2200;
+  const resize = () => { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); placeSplit(); };
+  new ResizeObserver(resize).observe(canvas); resize();
+}
+// one shader for ground and roofs: imagery by plan position, before|after split in screen space, simple sun shading.
+// walls use their vertex colour instead (aRoof = 0).
+function material(texB, texA){
+  return new THREE.ShaderMaterial({
+    uniforms:{tB:{value:texB}, tA:{value:texA}, HALF:{value:T.half}, mode:{value:mode}, split:{value:0.5}, W:{value:1}, L:{value:new THREE.Vector3(-0.4,-0.5,0.77).normalize()}, selB:{value:-1}},
+    vertexShader:`attribute float aRoof; attribute float aBid; attribute vec3 color; varying vec2 vxy; varying vec3 vn; varying float vr; varying vec3 vc; varying float vb;
+      void main(){ vxy = position.xy; vn = normal; vr = aRoof; vc = color; vb = aBid; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader:`uniform sampler2D tB; uniform sampler2D tA; uniform float HALF; uniform int mode; uniform float split; uniform float W; uniform vec3 L; uniform float selB;
+      varying vec2 vxy; varying vec3 vn; varying float vr; varying vec3 vc; varying float vb;
+      void main(){
+        vec2 uv = vec2((vxy.x + HALF) / (2.0 * HALF), (vxy.y + HALF) / (2.0 * HALF));
+        bool after = mode == 1 || (mode == 2 && gl_FragCoord.x > split * W);
+        vec3 img = after ? texture2D(tA, uv).rgb : texture2D(tB, uv).rgb;
+        float s = 0.72 + 0.38 * max(dot(normalize(vn), L), 0.0);
+        vec3 c = vr > 0.5 ? img : vc * s;
+        if (selB >= 0.0 && abs(vb - selB) < 0.5) c = mix(c, vec3(1.0, 0.95, 0.4), vr > 0.5 ? 0.25 : 0.45);
+        gl_FragColor = vec4(c, 1.0);
+#include <colorspace_fragment>
+      }`,
+  });
+}
+function buildTerrain(){
+  const n = T.ng, W = T.gc * (n - 1), g = new THREE.PlaneGeometry(W, W, n - 1, n - 1), p = g.attributes.position, dem = T.dem;
+  for (let i = 0; i < p.count; i++) p.setZ(i, dem[i] - 0.15);   // PlaneGeometry rows run north to south, like the DEM
+  g.computeVertexNormals();
+  const N = p.count; g.setAttribute("aRoof", new THREE.Float32BufferAttribute(new Float32Array(N).fill(1), 1));
+  g.setAttribute("aBid", new THREE.Float32BufferAttribute(new Float32Array(N).fill(-1), 1));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(N * 3), 3));
+  scene.add(new THREE.Mesh(g, mat));
+}
+function standing(b){ return !(b.demo && !b.demoAfter); }       // demolished before the tornado: not drawn
+function buildBuildings(){
+  const pos = [], nor = [], roof = [], bid = [], idx = [];
+  faceB = [];
+  T.buildings.forEach((b, k) => {
+    if (!standing(b)) return;
+    const R = b.ring.slice(0, -1), z0 = b.base, z1 = b.base + (b.h || 4);
+    // walls
+    for (let i = 0; i < R.length; i++){
+      const a = R[i], c = R[(i + 1) % R.length], dx = c[0] - a[0], dy = c[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = dy / L, ny = -dx / L, v = pos.length / 3;
+      pos.push(a[0], a[1], z0, c[0], c[1], z0, c[0], c[1], z1, a[0], a[1], z1);
+      for (let j = 0; j < 4; j++){ nor.push(nx, ny, 0); roof.push(0); bid.push(k); }
+      idx.push(v, v + 1, v + 2, v, v + 2, v + 3); faceB.push(k, k);
+    }
+    // roof cap
+    const v0 = pos.length / 3, tri = THREE.ShapeUtils.triangulateShape(R.map(p => new THREE.Vector2(p[0], p[1])), []);
+    for (const p of R){ pos.push(p[0], p[1], z1); nor.push(0, 0, 1); roof.push(1); bid.push(k); }
+    for (const t of tri){ idx.push(v0 + t[0], v0 + t[1], v0 + t[2]); faceB.push(k); }
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute("aRoof", new THREE.Float32BufferAttribute(roof, 1)); g.setAttribute("aBid", new THREE.Float32BufferAttribute(bid, 1));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(pos.length), 3)); g.setIndex(idx);
+  bMesh = new THREE.Mesh(g, mat); bMesh.material.side = THREE.DoubleSide; scene.add(bMesh); colorWalls();
+}
+function wallHex(b){
+  const m = $("wall").value;
+  if (m === "ds") return b.survey && b.survey.ds >= 0 ? DSC[b.survey.ds] : NOSURV;
+  if (m === "demo") return b.demoAfter ? DEMO : KEEP;
+  return KEEP;
+}
+function colorWalls(){
+  const col = bMesh.geometry.attributes.color, bid = bMesh.geometry.attributes.aBid, c = new THREE.Color();
+  for (let i = 0; i < bid.count; i++){ c.setHex(wallHex(T.buildings[bid.getX(i)])); col.setXYZ(i, c.r, c.g, c.b); }
+  col.needsUpdate = true; legend();
+}
+function legend(){
+  const m = $("wall").value, row = (hex, l) => `<div class="row"><span class="sw" style="background:#${hex.toString(16).padStart(6, "0")}"></span>${esc(l)}</div>`;
+  $("legend").innerHTML = m === "ds" ? "<b>Walls: observed damage</b>" + DSN.map((l, k) => row(DSC[k], l)).join("") + row(NOSURV, "not surveyed")
+    : m === "demo" ? "<b>Walls: City demolition record</b>" + row(DEMO, "demolished since May 16, 2025") + row(KEEP, "no demolition date") : "<b>Walls</b>" + row(KEEP, "all buildings");
+}
+
+// ---------------------------------------------------------------- imagery mode + split handle
+function setMode(m){
+  mode = m; mat.uniforms.mode.value = m;
+  document.querySelectorAll("[data-img]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.img === m)); placeSplit();
+}
+function placeSplit(){
+  if (!mat) return;
+  const w = canvas.clientWidth; mat.uniforms.W.value = renderer.domElement.width; mat.uniforms.split.value = split;
+  $("split").hidden = mode !== 2; $("split").style.left = split * w + "px";
+}
+function wireSplit(){
+  const h = $("split").querySelector("span"); let drag = false;
+  h.onpointerdown = e => { drag = true; h.setPointerCapture(e.pointerId); controls.enabled = false; };
+  h.onpointermove = e => { if (!drag) return; const r = canvas.getBoundingClientRect(); split = Math.min(0.98, Math.max(0.02, (e.clientX - r.left) / r.width)); placeSplit(); };
+  h.onpointerup = () => { drag = false; controls.enabled = true; };
+}
+
+// ---------------------------------------------------------------- picking + panel
+const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+function pick(e){
+  const r = canvas.getBoundingClientRect(); ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ptr, camera); const h = ray.intersectObject(bMesh)[0];
+  if (!h) return;
+  sel = faceB[h.faceIndex]; mat.uniforms.selB.value = sel; renderBuilding(T.buildings[sel]);
+}
+let down = null;
+canvas.addEventListener("pointerdown", e => down = [e.clientX, e.clientY]);
+canvas.addEventListener("pointerup", e => { if (down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 4 && bMesh) pick(e); down = null; });
+function renderOverview(){
+  sel = -1; if (mat) mat.uniforms.selB.value = -1;
+  const st = T.buildings.filter(standing), surv = st.filter(b => b.survey && b.survey.ds >= 0);
+  const rows = [0, 1, 2, 3, 4].map(k => { const g = surv.filter(b => b.survey.ds === k), d = g.filter(b => b.demoAfter).length;
+    return `<tr><td>${DSN[k]}</td><td>${g.length}</td><td>${d}</td><td>${g.length ? Math.round(100 * d / g.length) + "%" : "–"}</td></tr>`; }).join("");
+  const un = st.filter(b => !b.survey || b.survey.ds < 0), und = un.filter(b => b.demoAfter).length;
+  $("panel").innerHTML = `<h2>${esc(S.focus.headline)}</h2><p>${esc(S.focus.intro)}</p>
+    <h3>Demolished since the tornado, by observed damage</h3>
+    <table><thead><tr><th>Observed</th><th>Buildings</th><th>Demolished</th><th>Share</th></tr></thead><tbody>${rows}
+    <tr><td>not surveyed</td><td>${un.length}</td><td>${und}</td><td>${un.length ? Math.round(100 * und / un.length) + "%" : "–"}</td></tr></tbody></table>
+    <p class="meta" style="margin-top:4px">City demolition dates through ${esc(T.lastDemo)}. Footprints wholly inside the ${2 * T.half} m square.</p>
+    <h3>What the model is</h3><p>${esc(S.focus.what)}</p>`;
+}
+function renderBuilding(b){
+  const s = b.survey;
+  $("panel").innerHTML = `<p><button class="back" id="bk" type="button">← Overview</button></p>
+    <h2>${s && s.ds >= 0 ? DSN[s.ds] : "Not surveyed"}</h2>
+    <dl class="kv">
+      ${s ? `<dt>Survey</dt><dd>${esc(S.surveys[s.src])}</dd><dt>Archetype</dt><dd>T${s.arch}</dd><dt>NWS EF zone</dt><dd>${s.ef >= 0 ? "EF" + s.ef : "–"}</dd><dt>Year built</dt><dd>${s.yb ?? "–"}</dd>` : ""}
+      <dt>Height (City)</dt><dd>${b.h ? b.h.toFixed(1) + " m" : "unknown, drawn at 4 m"}</dd>
+      <dt>Roof form</dt><dd>${esc(b.roof || "–")}</dd>
+      <dt>Floor area</dt><dd>${b.sqft ? Math.round(b.sqft).toLocaleString() + " sq ft" : "–"}</dd>
+      <dt>Neighborhood</dt><dd>${esc(b.nhd || "–")}</dd>
+      <dt>City demolition</dt><dd>${b.demo ? esc(b.demo) + (b.demoAfter ? " (after the tornado)" : "") : "none recorded"}</dd>
+    </dl>`;
+  $("bk").onclick = renderOverview;
+}
+
+// ---------------------------------------------------------------- views
+function view(v){
+  const t = new THREE.Vector3(0, 0, 0), d = {oblique:[0.35, -0.75, 0.62, 900], top:[0.001, -0.001, 1, 1300], street:[0.2, -0.95, 0.12, 380]}[v];
+  controls.target.copy(t); camera.position.set(d[0], d[1], d[2]).normalize().multiplyScalar(d[3]); controls.update();
+}
+
+// ---------------------------------------------------------------- boot
+function report(what, e){ const pre = document.createElement("pre"); pre.textContent = `Could not load ${what}\n${e && e.stack || e}`; statusEl.replaceChildren(pre); }
+async function boot(){
+  try {
+    statusEl.textContent = "Loading model…";
+    [S, T] = await Promise.all([getJSON("site.json"), getJSON("f3d.json")]);
+    T.dem = new Float32Array(await getBuf("f3d_terrain.bin"));
+    T.lastDemo = T.buildings.map(b => b.demo).filter(Boolean).sort().pop() || "–";
+    try { NM = await getJSON("nearmap_meta.json"); } catch(e){ NM = null; }
+    if (!NM) throw new Error("This build has no aerial imagery, which the 3D view needs.");
+    document.title = S.site.short + " 3D"; $("title").textContent = S.focus.title; $("subtitle").textContent = S.focus.sub;
+    $("meta").textContent = `ground: ${T.lidar.split(" (")[0]} · footprints: City assessor · built ${T.generated}`;
+    $("about").innerHTML = S.focus.about.map(t => `<p>${esc(t)}</p>`).join("");
+    $("lb").textContent = "Before · " + NM.epochs.before.date; $("la").textContent = "After · " + NM.epochs.after.date;
+    setup();
+    const [tb, ta] = await Promise.all([getTex("nm/focus/before.jpg"), getTex("nm/focus/after.jpg")]);
+    mat = material(tb, ta);
+    buildTerrain(); buildBuildings(); view("oblique"); setMode(2); wireSplit(); renderOverview();
+    statusEl.hidden = true;
+    $("wall").onchange = colorWalls;
+    document.querySelectorAll("[data-img]").forEach(b => b.onclick = () => setMode(+b.dataset.img));
+    document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => view(b.dataset.view));
+    $("forget").onclick = async () => { if (FORGET) await FORGET(); location.reload(); };
+  } catch(e){ report("the 3D model", e); return; }
+  (function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+}
+
+// ---------------------------------------------------------------- gate (shared store with the map page, so one unlock covers both)
+(async function(){
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  let Gt = null;
+  try { const r = await fetch("gate.json"); if (r.ok) Gt = await r.json(); } catch(e){}
+  if (!Gt) return boot();
+  const gate = document.createElement("div"); gate.id = "gate";
+  gate.innerHTML = `<form id="gateform"><p class="eyebrow">Penn State Heritage 3D Lab</p><h1 style="font-size:22px">Digital twin</h1>
+    <label for="pw" class="sub">Enter the password to view.</label><input id="pw" type="password" autocomplete="current-password" required>
+    <label class="sub" style="display:flex;gap:8px;align-items:center"><input id="remember" type="checkbox" checked> Remember on this device for 30 days</label>
+    <button type="submit">View</button><p id="gatemsg" class="sub" role="alert" style="margin:0;min-height:1.2em"></p></form>`;
+  document.body.appendChild(gate); document.querySelector(".wrap").inert = true; $("pw").focus();
+  const tryKey = async k => { const u = b64(Gt.check); try { await crypto.subtle.decrypt({name:"AES-GCM", iv:u.slice(0,12)}, k, u.slice(12)); return true; } catch(e){ return false; } };
+  const open = k => { KEY = k; gate.remove(); document.querySelector(".wrap").inert = false; FORGET = idbDel; boot(); };
+  const DB = "stl-twin";
+  const idb = () => new Promise((res, rej) => { const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => r.result.createObjectStore("k"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const idbGet = async () => { const db = await idb(); return new Promise(res => { const q = db.transaction("k").objectStore("k").get("key"); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); };
+  const idbPut = async v => { const db = await idb(); return new Promise(res => { const t = db.transaction("k", "readwrite"); t.objectStore("k").put(v, "key"); t.oncomplete = res; t.onerror = res; }); };
+  const idbDel = async () => { try { const db = await idb(); db.transaction("k", "readwrite").objectStore("k").delete("key"); } catch(e){} };
+  try { const s = await idbGet();
+    if (s && s.exp > Date.now() && s.salt === Gt.salt && await tryKey(s.key)) return open(s.key);
+    if (s) await idbDel(); } catch(e){}
+  $("gateform").addEventListener("submit", async e => {
+    e.preventDefault(); const msg = $("gatemsg"); msg.textContent = "Checking…";
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode($("pw").value.trim().toLowerCase()), "PBKDF2", false, ["deriveKey"]);
+    const k = await crypto.subtle.deriveKey({name:"PBKDF2", salt:b64(Gt.salt), iterations:Gt.iter, hash:"SHA-256"}, base, {name:"AES-GCM", length:256}, false, ["decrypt"]);
+    if (!(await tryKey(k))){ msg.textContent = "That password didn't work."; return; }
+    if ($("remember").checked){ try { await idbPut({key:k, salt:Gt.salt, exp:Date.now() + 30*864e5}); } catch(e){} }
+    open(k);
+  });
+})();
+</script>
+</body>
+</html>

@@ -65,7 +65,7 @@ main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:10px;min-height:
 .loop{list-style:none;margin:0;padding:0;display:grid;gap:6px}
 .loop li{display:grid;grid-template-columns:22px 1fr;gap:6px;align-items:start}
 .loop .ic{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 11px var(--sans);color:#fff;margin-top:1px}
-.ic.done{background:#0ca30c}.ic.blocked{background:#d03b3b}.ic.todo{background:var(--muted)}
+.ic.done{background:#0ca30c}.ic.blocked{background:#d03b3b}.ic.started{background:#1e5f8e}.ic.todo{background:var(--muted)}
 .loop b{font-weight:600}.loop p{margin:0;color:var(--ink-2);font-size:12.5px}
 table{border-collapse:collapse;width:100%;font-size:12.5px}
 th,td{padding:4px 6px;border-bottom:1px solid var(--grid);text-align:right;font-variant-numeric:tabular-nums}
@@ -87,6 +87,14 @@ dl.kv dt{color:var(--muted)} dl.kv dd{margin:0}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-bottom:6px}
 .seg button{border:0;background:var(--surface);color:var(--ink-2);font:inherit;font-size:12px;padding:3px 9px;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.swipe{position:absolute;top:0;bottom:0;width:0;z-index:650;pointer-events:none}
+.swipe::before{content:"";position:absolute;top:0;bottom:0;left:-1px;width:2px;background:#fff;box-shadow:0 0 4px rgba(0,0,0,.6)}
+.swipe input{pointer-events:auto;position:absolute;top:50%;left:-14px;width:28px;height:28px;margin:0;opacity:0;cursor:ew-resize}
+.swipe span{position:absolute;top:calc(50% - 14px);left:-14px;width:28px;height:28px;border-radius:50%;background:#fff;color:#18202a;display:grid;place-items:center;font:700 13px var(--sans);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.swipe b{position:absolute;top:8px;font:600 11.5px var(--sans);color:#fff;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px;white-space:nowrap}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+.pair figure{margin:0}.pair canvas{width:100%;aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--grid);display:block}
+.pair figcaption{font-size:11.5px;color:var(--muted);margin-top:2px}
 .tip{position:fixed;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:2000}
 details.about{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 16px}
 details.about summary{cursor:pointer;font-weight:600}
@@ -116,6 +124,9 @@ a{color:var(--accent)}
       <option value="res">observed minus IN-CORE</option>
       <option value="arch">archetype</option>
       <option value="yb">year built</option>
+    </select></label>
+    <label class="chip" id="imgChip" hidden>Imagery <select id="img" aria-label="Aerial imagery">
+      <option value="off">off</option><option value="before">before</option><option value="after">after</option><option value="swipe">before | after swipe</option>
     </select></label>
     <label class="chip"><input type="checkbox" id="lyrB" checked> Surveyed buildings</label>
     <label class="chip"><input type="checkbox" id="lyrEF" checked> NWS EF zones</label>
@@ -240,6 +251,77 @@ function setBase(){   // Esri canvas tiles need no key or referrer (the page sen
           L.tileLayer(u("Reference"), {maxZoom:19, maxNativeZoom:16, pane:"overlayPane", opacity:0.9}).addTo(map)];
 }
 
+// ---------------------------------------------------------------- licensed aerial imagery (encrypted tiles, if this build has them)
+let NM = null, NMH = {}, nmLayers = {}, swipeEl = null;
+const nmHas = (e, z, x, y) => NMH[e] && NMH[e][z] && NMH[e][z].has(x + "/" + y);
+const EncTiles = L.GridLayer.extend({
+  createTile(c, done){
+    const img = document.createElement("img"); img.alt = "";
+    if (!nmHas(this.options.epoch, c.z, c.x, c.y)){ setTimeout(() => done(null, img)); return img; }
+    getBuf(`nm/${this.options.epoch}/${c.z}/${c.x}/${c.y}.${(NM.ext || {})[c.z] || "jpg"}`).then(b => {
+      const u = URL.createObjectURL(new Blob([b])); img.onload = () => { URL.revokeObjectURL(u); done(null, img); }; img.src = u;
+    }).catch(e => done(e, img));
+    return img;
+  }
+});
+function initImagery(){
+  for (const [e, m] of Object.entries(NM.epochs)){ NMH[e] = {}; for (const [z, l] of Object.entries(m.tiles)) NMH[e][z] = new Set(l.map(([x, y]) => x + "/" + y)); }
+  for (const e of Object.keys(NM.epochs)){
+    const pane = map.createPane("nm_" + e); pane.style.zIndex = e === "after" ? 260 : 250;
+    // z14-18 everywhere on the path, z19 over the EF2/EF3 core (Leaflet scales tiles past their native zoom)
+    nmLayers[e] = [new EncTiles({epoch:e, pane:"nm_" + e, minNativeZoom:14, maxNativeZoom:18, maxZoom:21, minZoom:12}),
+                   new EncTiles({epoch:e, pane:"nm_" + e, minZoom:19, minNativeZoom:19, maxNativeZoom:19, maxZoom:21})];
+  }
+  const d = (e) => new Date(NM.epochs[e].date + "T12:00").toLocaleDateString(undefined, {month:"short", day:"numeric", year:"numeric"});
+  $("img").options[1].text = "before (" + d("before") + ")"; $("img").options[2].text = "after (" + d("after") + ")";
+  swipeEl = L.DomUtil.create("div", "swipe", map.getContainer()); swipeEl.hidden = true;
+  swipeEl.innerHTML = `<b style="right:10px">${esc(d("before"))}</b><b style="left:10px">${esc(d("after"))}</b><span aria-hidden="true">⇔</span><input type="range" min="0" max="1000" value="500" aria-label="Swipe between before and after">`;
+  L.DomEvent.disableClickPropagation(swipeEl);
+  let drag = false; const sp = swipeEl.querySelector("span"), rng = swipeEl.querySelector("input");
+  const setX = x => { const w = map.getSize().x; swipeEl.dataset.f = Math.min(0.98, Math.max(0.02, x / w)); clip(); };
+  sp.style.pointerEvents = "auto"; sp.style.cursor = "ew-resize";
+  sp.onpointerdown = e => { drag = true; sp.setPointerCapture(e.pointerId); map.dragging.disable(); };
+  sp.onpointermove = e => { if (drag) setX(e.clientX - map.getContainer().getBoundingClientRect().left); };
+  sp.onpointerup = () => { drag = false; map.dragging.enable(); };
+  rng.oninput = () => setX(rng.value / 1000 * map.getSize().x);
+  swipeEl.dataset.f = 0.5;
+  map.on("move zoom resize", clip);
+  $("imgChip").hidden = false; $("img").onchange = setImagery;
+}
+function clip(){
+  if (!swipeEl) return;
+  const pane = map.getPane("nm_after");
+  if ($("img").value !== "swipe"){ pane.style.clip = ""; swipeEl.hidden = true; return; }
+  const sz = map.getSize(), x = +swipeEl.dataset.f * sz.x, nw = map.containerPointToLayerPoint([0, 0]), se = map.containerPointToLayerPoint(sz);
+  pane.style.clip = `rect(${nw.y}px, ${se.x}px, ${se.y}px, ${nw.x + x}px)`;    // "after" shows right of the divider
+  swipeEl.hidden = false; swipeEl.style.left = x + "px";
+}
+function setImagery(){
+  const v = $("img").value;
+  for (const [e, ls] of Object.entries(nmLayers)) for (const l of ls) (v === e || v === "swipe") ? l.addTo(map) : l.remove();
+  if (v !== "off" && map.getZoom() < 15) map.setZoom(15);
+  clip();
+}
+// before/after close-up around one point: decrypt the covering tiles and draw a 120 m square
+async function closeup(epoch, lat, lon, cv){
+  const n0 = 2 ** 19, inCore = nmHas(epoch, 19, Math.floor((lon + 180) / 360 * n0), Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n0));
+  const z = inCore ? 19 : 18, n = 2 ** z;
+  const fx = (lon + 180) / 360 * n * 256, fy = (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
+  const half = 60 / (156543.03 * Math.cos(lat * Math.PI / 180) / n);    // 60 m in pixels at zoom z
+  const S = cv.width = cv.height = 320, k = S / (2 * half), g = cv.getContext("2d"); let drew = 0;
+  const x0 = Math.floor((fx - half) / 256), x1 = Math.floor((fx + half) / 256), y0 = Math.floor((fy - half) / 256), y1 = Math.floor((fy + half) / 256);
+  await Promise.all([...Array((x1 - x0 + 1) * (y1 - y0 + 1)).keys()].map(async i => {
+    const x = x0 + i % (x1 - x0 + 1), y = y0 + Math.floor(i / (x1 - x0 + 1));
+    if (!nmHas(epoch, z, x, y)) return;
+    const bmp = await createImageBitmap(new Blob([await getBuf(`nm/${epoch}/${z}/${x}/${y}.jpg`)], {type:"image/jpeg"}));
+    g.drawImage(bmp, (x * 256 - fx + half) * k, (y * 256 - fy + half) * k, 256 * k, 256 * k); drew++;
+  }));
+  if (!drew){ g.fillStyle = css("--muted"); g.font = "13px system-ui"; g.textAlign = "center"; g.fillText("no capture here", S / 2, S / 2); return false; }
+  g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.arc(S / 2, S / 2, 9, 0, 2 * Math.PI); g.stroke();
+  g.strokeStyle = "rgba(0,0,0,.6)"; g.lineWidth = 1; g.beginPath(); g.arc(S / 2, S / 2, 11, 0, 2 * Math.PI); g.stroke();
+  return true;
+}
+
 // ---------------------------------------------------------------- panel
 const panel = () => $("panel");
 function stratumOf(arch, ef){ return M.strata.find(s => s.arch === "t" + arch && s.ef === ef); }
@@ -255,8 +337,9 @@ function renderOverview(){
       <div class="stat"><b>${rated.toLocaleString()}</b><span>with a damage state</span></div>
       <div class="stat"><b>${G.lat.length.toLocaleString()}</b><span>unsurveyed pre-1950 parcels</span></div>
     </div>
+    ${NM ? `<p style="margin:12px 0 0"><a href="3d.html">${esc(S.threeD)} →</a></p>` : ""}
     <h3>Twin loop status</h3>
-    <ol class="loop">${S.loop.map(s => `<li><span class="ic ${s.state}" aria-hidden="true">${s.state === "done" ? "✓" : s.state === "blocked" ? "!" : "–"}</span><div><b>${esc(s.stage)}</b> <span class="meta">${s.state === "done" ? "in place" : s.state === "blocked" ? "blocked" : "not started"}</span><p>${esc(s.text)}</p></div></li>`).join("")}</ol>
+    <ol class="loop">${S.loop.map(s => `<li><span class="ic ${s.state}" aria-hidden="true">${{done:"✓", blocked:"!", started:"◐"}[s.state] || "–"}</span><div><b>${esc(s.stage)}</b> <span class="meta">${{done:"in place", blocked:"blocked", started:"started"}[s.state] || "not started"}</span><p>${esc(s.text)}</p></div></li>`).join("")}</ol>
     <h3>Mean damage state by stratum</h3>
     <table><thead><tr><th>Stratum</th><th>n</th><th>Observed</th><th>IN-CORE</th><th>T20 fit</th><th>RPSS</th></tr></thead><tbody>${rows}</tbody></table>
     <p class="meta" style="margin:4px 0 0">Mean DS on 0–4. RPSS compares IN-CORE with simply forecasting each stratum's observed distribution (0 = as good, below 0 = worse); n from the comparison table.</p>
@@ -315,8 +398,11 @@ function renderBuilding(i){
       <dt>T20 fit expected</dt><dd>${fmt(c.eT20[i])} DS</dd>
       <dt>Observed − IN-CORE</dt><dd>${res == null ? "–" : (res > 0 ? "+" : "") + fmt(res)} DS</dd>
     </dl>
-    ${s ? `<p class="meta">Expected values are the stratum average (T${c.arch[i]}, EF${c.ef[i]}, n = ${s.n}), not a building-specific prediction.</p>` : ""}`;
+    ${s ? `<p class="meta">Expected values are the stratum average (T${c.arch[i]}, EF${c.ef[i]}, n = ${s.n}), not a building-specific prediction.</p>` : ""}
+    ${NM ? `<h3>Aerial, before and after</h3><div class="pair">${["before", "after"].map(e => `<figure><canvas id="cu_${e}" aria-label="${e} aerial"></canvas><figcaption>${esc(NM.epochs[e].date)}</figcaption></figure>`).join("")}</div>
+      <p class="meta" style="margin-top:4px">120 m square, building at the circle. Nearmap, licensed. March is leaf-off and May leaf-on, so canopy differences are not damage.</p>` : ""}`;
   $("bk").onclick = renderOverview;
+  if (NM) for (const e of ["before", "after"]) closeup(e, c.lat[i], c.lon[i], $("cu_" + e)).catch(err => console.error(err));
 }
 function renderTrack(t){
   panel().innerHTML = `<p><button class="back" id="bk" type="button">← Overview</button></p><h2>NWS track · ${esc(t.ef)}, ${t.wind} mph</h2>
@@ -333,6 +419,7 @@ async function boot(){
   try {
     $("status").textContent = "Loading…";
     [S, B, G, N, M] = await Promise.all(["site.json", "buildings.json", "gap.json", "nws.json", "model.json"].map(getJSON));
+    try { NM = await getJSON("nearmap_meta.json"); } catch(err){ NM = null; }   // licensed layer, only in builds that include it
     document.title = S.site.short + " Twin"; $("title").textContent = S.site.name; $("subtitle").textContent = S.site.sub;
     $("meta").textContent = `built ${M.generated} · data ${M.ifd_commit}`;
     $("about").innerHTML = S.about.map(t => `<p>${esc(t)}</p>`).join("");
@@ -342,6 +429,7 @@ async function boot(){
     legendCtl = L.control({position:"bottomright"}); legendCtl.onAdd = () => { const d = L.DomUtil.create("div", "legend"); L.DomEvent.disableClickPropagation(d); return d; }; legendCtl.addTo(map);
     const h = location.hash.slice(1); if ([...$("color").options].some(o => o.value === h)) $("color").value = h;   // e.g. #res links to the residual view
     drawEF(); drawTrack(); drawBuildings(); syncLayers();
+    if (NM) initImagery();
     $("status").hidden = true; renderOverview();
     $("color").onchange = drawBuildings; $("efF").onchange = drawBuildings;
     for (const id of ["lyrB", "lyrEF", "lyrT", "lyrN", "lyrG"]) $(id).onchange = syncLayers;
