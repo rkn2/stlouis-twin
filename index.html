@@ -20,6 +20,7 @@
   /* residual: blue (less damage than predicted) <-> gray <-> red (more) */
   --rn3:#104281; --rn2:#2a78d6; --rn1:#86b6ef; --r0:#cfcdc6; --rp1:#f2a7a0; --rp2:#e34948; --rp3:#9e2323;
   --s1:#2a78d6; --s2:#eb6834;
+  /* demolition: status colours (always with a label) */ --dm2:#d03b3b; --dm1:#fab219; --dm0:#c9c7bf;
   --sans:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --serif:Bitter,Georgia,serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
   color-scheme:light;
 }
@@ -124,6 +125,7 @@ a{color:var(--accent)}
       <option value="res">observed minus IN-CORE</option>
       <option value="arch">archetype</option>
       <option value="yb">year built</option>
+      <option value="demo">demolished since the tornado</option>
     </select></label>
     <label class="chip" id="imgChip" hidden>Imagery <select id="img" aria-label="Aerial imagery">
       <option value="off">off</option><option value="before">before</option><option value="after">after</option><option value="swipe">before | after swipe</option>
@@ -133,6 +135,7 @@ a{color:var(--accent)}
     <label class="chip"><input type="checkbox" id="lyrT" checked> Track</label>
     <label class="chip"><input type="checkbox" id="lyrN"> NWS damage points</label>
     <label class="chip"><input type="checkbox" id="lyrG"> Unsurveyed pre-1950 parcels</label>
+    <label class="chip"><input type="checkbox" id="lyrD"> Demolition permits since the tornado</label>
     <label class="chip">EF zone <select id="efF" aria-label="Filter by EF zone"><option value="all">all</option><option value="0">EF0</option><option value="1">EF1</option><option value="2">EF2</option><option value="3">EF3</option></select></label>
   </div>
   <div id="status">Loading…</div>
@@ -174,7 +177,7 @@ const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).
 const fmt = (v, d=2) => v == null || !isFinite(v) ? "–" : (+v).toFixed(d);
 const DSN = ["DS0 none", "DS1 slight", "DS2 moderate", "DS3 extensive", "DS4 complete"];
 
-let S, B, G, N, M, map, base, L_B, L_EF, L_T, L_N, L_G, nB = 0;
+let R, L_D, S, B, G, N, M, map, base, L_B, L_EF, L_T, L_N, L_G, nB = 0;
 const dark = () => document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
 
 // ---------------------------------------------------------------- colour encodings
@@ -186,6 +189,7 @@ function bColor(i){
   if (mode === "res"){ const v = c.ds[i] < 0 || c.eInc[i] == null ? null : c.ds[i] - c.eInc[i]; const k = resBin(v); return k && css(k); }
   if (mode === "arch") return css(c.arch[i] === 6 ? "--s2" : "--s1");
   if (mode === "yb"){ const y = c.yb[i]; if (y == null) return null; return css(YB.find(([t]) => y < t)[1]); }
+  if (mode === "demo") return c.demo[i] < 0 ? null : css("--dm" + c.demo[i]);
 }
 function legend(){
   const mode = $("color").value, row = (cls, label, sq) => `<div class="row"><span class="sw${sq ? " sq" : ""}${cls ? "" : " hollow"}" style="background:${cls ? css(cls) : ""}"></span>${esc(label)}</div>`;
@@ -193,8 +197,10 @@ function legend(){
   if (mode === "ds") h = "<b>Observed damage</b>" + [0,1,2,3,4].map(k => row("--ds" + k, DSN[k])).join("") + row(null, "no rating");
   if (mode === "res") h = "<b>Observed − IN-CORE expected (DS)</b>" + [["--rn3","≤ −2 (far less damage)"],["--rn2","−2 to −1"],["--rn1","−1 to −⅓"],["--r0","about as predicted"],["--rp1","⅓ to 1"],["--rp2","1 to 2"],["--rp3","> 2 (far more damage)"]].map(([k,l]) => row(k,l)).join("") + row(null, "no rating");
   if (mode === "arch") h = "<b>IN-CORE archetype</b>" + row("--s1","T19 low-rise (masonry, 2+ storeys)") + row("--s2","T6 one-storey commercial");
+  if (mode === "demo") h = "<b>City demolition record</b>" + row("--dm2", "demolished (completed permit or City demolition date)") + row("--dm1", "permit filed, not yet completed") + row("--dm0", "no demolition recorded") + row(null, "outside the City: no City data");
   if (mode === "yb") h = "<b>Year built (assessor)</b>" + row("--ef0","before 1880") + row("--ef1","1880–1899") + row("--ef2","1900–1919") + row("--ef3","1920 or later") + row(null,"unknown");
   if ($("lyrEF").checked) h += "<b style='margin-top:6px'>NWS EF zone</b>" + [0,1,2,3].map(k => row("--ef" + k, "EF" + k, true)).join("");
+  if ($("lyrD").checked) h += `<div class="row" style="margin-top:6px"><span class="sw sq" style="background:${css("--dm2")};opacity:.5"></span>demolition permit parcel (filed since May 16, 2025)</div>`;
   if ($("lyrG").checked) h += `<div class="row" style="margin-top:6px"><span class="sw sq" style="background:transparent;border:1.5px dashed ${css("--ink-2")}"></span>unsurveyed parcel</div>`;
   legendCtl.getContainer().innerHTML = h;
 }
@@ -241,8 +247,17 @@ function drawGap(){
     L_G.addLayer(m);
   }
 }
+function drawPermits(){
+  L_D.clearLayers();
+  for (const p of R.permits){
+    const g = L.geoJSON(p.geom, {style:{color:css("--dm2"), weight:1, fillColor:css(p.PermitStatus === "Completed" ? "--dm2" : "--dm1"), fillOpacity:0.45}});
+    g.bindTooltip(`Demolition permit · ${esc(p.PermitStatus)}<br>${esc(p.StructureDescription || "structure not given")} · filed ${esc(p.submitted)}${p.closed ? " · closed " + esc(p.closed) : ""}<br>${esc(p.BidPackage_ParcelSourcingType)} · ${esc(p.BidPackage_FundingSource)}`);
+    g.addTo(L_D);
+  }
+}
 function syncLayers(){
-  for (const [id, l] of [["lyrB", L_B], ["lyrEF", L_EF], ["lyrT", L_T], ["lyrN", L_N], ["lyrG", L_G]]) $(id).checked ? l.addTo(map) : l.remove();
+  for (const [id, l] of [["lyrB", L_B], ["lyrEF", L_EF], ["lyrT", L_T], ["lyrN", L_N], ["lyrG", L_G], ["lyrD", L_D]]) $(id).checked ? l.addTo(map) : l.remove();
+  if ($("lyrD").checked && !L_D.getLayers().length) drawPermits();
   if ($("lyrN").checked && !L_N.getLayers().length) drawNWS();
   if ($("lyrG").checked && !L_G.getLayers().length) drawGap();
   legend();
@@ -344,6 +359,9 @@ function renderOverview(){
     ${NM ? `<p style="margin:12px 0 0"><a href="3d.html">${esc(S.threeD)} →</a></p>` : ""}
     <h3>Twin loop status</h3>
     <ol class="loop">${S.loop.map(s => `<li><span class="ic ${s.state}" aria-hidden="true">${{done:"✓", blocked:"!", started:"◐"}[s.state] || "–"}</span><div><b>${esc(s.stage)}</b> <span class="meta">${{done:"in place", blocked:"blocked", started:"started"}[s.state] || "not started"}</span><p>${esc(s.text)}</p></div></li>`).join("")}</ol>
+    <h3>Recovery: demolished since the tornado</h3>
+    <table><thead><tr><th>Observed</th><th>In the City</th><th>Demolished</th><th>Share</th><th>Permit filed</th></tr></thead><tbody>${R.gradient.map(g => `<tr><td>${DSN[g.ds]}</td><td>${g.n.toLocaleString()}</td><td>${g.demolished}</td><td>${g.n ? Math.round(100 * g.demolished / g.n) + "%" : "–"}</td><td>${g.filed}</td></tr>`).join("")}</tbody></table>
+    <p class="meta" style="margin:4px 0 0">${esc(S.recovery.note.replace("{before}", R.window.before).replace("{after}", R.window.after).replace("{asOf}", R.asOf))}</p>
     <h3>Mean damage state by stratum</h3>
     <table><thead><tr><th>Stratum</th><th>n</th><th>Observed</th><th>IN-CORE</th><th>T20 fit</th><th>RPSS</th></tr></thead><tbody>${rows}</tbody></table>
     <p class="meta" style="margin:4px 0 0">Mean DS on 0–4. RPSS compares IN-CORE with simply forecasting each stratum's observed distribution (0 = as good, below 0 = worse); n from the comparison table.</p>
@@ -394,6 +412,7 @@ function renderBuilding(i){
       <dt>Assessor wall</dt><dd>${esc(voc("wall", c.wall[i]))}</dd>
       <dt>Assessor use</dt><dd>${esc(voc("occ", c.occ[i]))}</dd>
       <dt>Historic district</dt><dd>${c.hd[i] === 1 ? "yes" : c.hd[i] === 0 ? "no" : "–"}</dd>
+      <dt>City demolition</dt><dd>${c.demo[i] < 0 ? "outside the City (no City data)" : c.demo[i] === 2 ? "demolished since the tornado (" + esc(c.demoDate[i]) + ")" : c.demo[i] === 1 ? "permit filed " + esc(c.demoDate[i]) + ", not completed" : "none recorded"}</dd>
       <dt>Nearest building</dt><dd>${c.nn[i] != null ? c.nn[i] + " m" + (c.nn[i] < 15 ? " (close-packed)" : "") : "–"}</dd>
     </dl>
     <h3>Model vs observation</h3>
@@ -422,22 +441,22 @@ function report(what, e){ const pre = document.createElement("pre"); pre.textCon
 async function boot(){
   try {
     $("status").textContent = "Loading…";
-    [S, B, G, N, M] = await Promise.all(["site.json", "buildings.json", "gap.json", "nws.json", "model.json"].map(getJSON));
+    [S, B, G, N, M, R] = await Promise.all(["site.json", "buildings.json", "gap.json", "nws.json", "model.json", "recovery.json"].map(getJSON));
     try { NM = await getJSON("nearmap_meta.json"); } catch(err){ NM = null; }   // licensed layer, only in builds that include it
     document.title = S.site.short + " Twin"; $("title").textContent = S.site.name; $("subtitle").textContent = S.site.sub;
     $("meta").textContent = `built ${M.generated} · data ${M.ifd_commit}`;
     $("about").innerHTML = S.about.map(t => `<p>${esc(t)}</p>`).join("");
     map = L.map("map", {preferCanvas:true, zoomControl:true}).fitBounds([[q(B.cols.lat, .02), q(B.cols.lon, .02)], [q(B.cols.lat, .98), q(B.cols.lon, .98)]]);   // core of the path; a few surveyed buildings are far out in Illinois
     canvas = L.canvas({padding:0.5}); setBase();
-    L_EF = L.layerGroup(); L_T = L.layerGroup(); L_G = L.layerGroup(); L_N = L.layerGroup(); L_B = L.layerGroup();
+    L_D = L.layerGroup(); L_EF = L.layerGroup(); L_T = L.layerGroup(); L_G = L.layerGroup(); L_N = L.layerGroup(); L_B = L.layerGroup();
     legendCtl = L.control({position:"bottomright"}); legendCtl.onAdd = () => { const d = L.DomUtil.create("div", "legend"); L.DomEvent.disableClickPropagation(d); return d; }; legendCtl.addTo(map);
     const h = location.hash.slice(1); if ([...$("color").options].some(o => o.value === h)) $("color").value = h;   // e.g. #res links to the residual view
     drawEF(); drawTrack(); drawBuildings(); syncLayers();
     if (NM) initImagery();
     $("status").hidden = true; renderOverview();
     $("color").onchange = drawBuildings; $("efF").onchange = drawBuildings;
-    for (const id of ["lyrB", "lyrEF", "lyrT", "lyrN", "lyrG"]) $(id).onchange = syncLayers;
-    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { setBase(); drawEF(); drawBuildings(); L_N.clearLayers(); L_G.clearLayers(); syncLayers(); renderOverview(); });
+    for (const id of ["lyrB", "lyrEF", "lyrT", "lyrN", "lyrG", "lyrD"]) $(id).onchange = syncLayers;
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { setBase(); drawEF(); drawBuildings(); L_N.clearLayers(); L_G.clearLayers(); L_D.clearLayers(); syncLayers(); renderOverview(); });
     $("forget").onclick = async () => { if (FORGET) await FORGET(); location.reload(); };
   } catch(e){ report("the twin", e); }
 }
