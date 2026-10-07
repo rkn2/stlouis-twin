@@ -95,13 +95,14 @@ a{color:var(--accent)}
     </div>
     <label class="chip">Walls <select id="wall" aria-label="Color walls by">
       <option value="ds">observed damage</option>
-      <option value="demo">demolished since the tornado</option>
+      <option value="demo">City demolition record</option>
+      <option value="src">footprint source</option>
       <option value="plain">plain</option>
     </select></label>
     <div class="seg" role="group" aria-label="Views">
-      <button type="button" data-view="oblique">Oblique</button>
-      <button type="button" data-view="top">Top down</button>
-      <button type="button" data-view="street">Low</button>
+      <button type="button" data-view="path">Whole path</button>
+      <button type="button" data-view="core">EF3 core</button>
+      <button type="button" data-view="low">Low, close</button>
     </div>
     <a class="chip" href="./">← Map of the whole path</a>
   </div>
@@ -110,7 +111,7 @@ a{color:var(--accent)}
       <canvas id="c" aria-label="3D model"></canvas>
       <div class="split" id="split" hidden><b id="lb" style="right:10px"></b><b id="la" style="left:10px"></b><span aria-hidden="true">⇔</span></div>
       <div class="legend" id="legend"></div>
-      <div class="hint">drag to orbit · right-drag to pan · scroll to zoom · click a building</div>
+      <div class="hint">drag to orbit · right-drag to pan · scroll to zoom · click a building · imagery sharpens as you move in</div>
       <div id="status">Loading…</div>
     </div>
     <aside class="panel" id="panel" aria-label="Details"></aside>
@@ -143,42 +144,42 @@ async function getBuf(name){
   catch(e){ throw new Error(`${url}: decrypt failed (${e.name})`); }
 }
 const getJSON = async n => JSON.parse(new TextDecoder().decode(await getBuf(n)));
-async function getTex(n){
-  const bmp = await createImageBitmap(new Blob([await getBuf(n)], {type:"image/jpeg"}), {imageOrientation:"flipY"});
-  const t = new THREE.Texture(bmp); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; return t;
-}
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const dark = () => document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
 const DSN = ["DS0 none", "DS1 slight", "DS2 moderate", "DS3 extensive", "DS4 complete"];
-// validated ordinal ramp (light-mode steps: walls are lit 3D surfaces, not marks on a page surface)
-const DSC = [0xa8a69f, 0xec9560, 0xd9652f, 0xb03d18, 0x6e1a0a], NOSURV = 0xd8d6cf, DEMO = 0xd03b3b, KEEP = 0xc9c7bf;
+// validated ordinal ramp (light-mode steps: walls are lit 3D surfaces); demolition uses the fixed status colours, always labelled
+const DSC = [0xa8a69f, 0xec9560, 0xd9652f, 0xb03d18, 0x6e1a0a], NOSURV = 0xd8d6cf, KEEP = 0xc9c7bf;
+const DEMOC = {2:0xd03b3b, 1:0xfab219, 0:0xc9c7bf, "-1":0x8fa3b8}, SRCC = {0:0xc9c7bf, 1:0x8fa3b8};
 
-let S, T, NM, renderer, scene, camera, controls, mat, bMesh, faceB = [], sel = -1, mode = 2, split = 0.5;
+let S, T, NM, renderer, scene, camera, controls, NMH = {}, mode = 2, split = 0.5, sel = -1, terr;
 const canvas = $("c"), statusEl = $("status");
+const R = 6378137, WORLD = 2 * Math.PI * R;
 
 // ---------------------------------------------------------------- scene
 function setup(){
   renderer = new THREE.WebGLRenderer({canvas, antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   scene = new THREE.Scene(); scene.background = new THREE.Color(0x11161c);
-  camera = new THREE.PerspectiveCamera(40, 1, 1, 6000); camera.up.set(0, 0, 1);
-  controls = new OrbitControls(camera, canvas); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 20; controls.maxDistance = 2200;
+  camera = new THREE.PerspectiveCamera(40, 1, 2, 60000); camera.up.set(0, 0, 1);
+  controls = new OrbitControls(camera, canvas); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 25; controls.maxDistance = 25000;
+  controls.screenSpacePanning = false;
   const resize = () => { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); placeSplit(); };
   new ResizeObserver(resize).observe(canvas); resize();
 }
-// one shader for ground and roofs: imagery by plan position, before|after split in screen space, simple sun shading.
-// walls use their vertex colour instead (aRoof = 0).
-function material(texB, texA){
+const GRAY = new THREE.DataTexture(new Uint8Array([138, 138, 134, 0]), 1, 1); GRAY.needsUpdate = true;
+const SHARED = {mode:{value:2}, split:{value:0.5}, W:{value:1}, selB:{value:-1}, L:{value:new THREE.Vector3(-0.4, -0.5, 0.77).normalize()}};
+function blockMaterial(){
   return new THREE.ShaderMaterial({
-    uniforms:{tB:{value:texB}, tA:{value:texA}, HALF:{value:T.half}, mode:{value:mode}, split:{value:0.5}, W:{value:1}, L:{value:new THREE.Vector3(-0.4,-0.5,0.77).normalize()}, selB:{value:-1}},
+    uniforms:{tB:{value:GRAY}, tA:{value:GRAY}, bb:{value:new THREE.Vector4(0, 0, 1, 1)}, ...SHARED}, side:THREE.DoubleSide,
     vertexShader:`attribute float aRoof; attribute float aBid; attribute vec3 color; varying vec2 vxy; varying vec3 vn; varying float vr; varying vec3 vc; varying float vb;
       void main(){ vxy = position.xy; vn = normal; vr = aRoof; vc = color; vb = aBid; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader:`uniform sampler2D tB; uniform sampler2D tA; uniform float HALF; uniform int mode; uniform float split; uniform float W; uniform vec3 L; uniform float selB;
+    fragmentShader:`uniform sampler2D tB; uniform sampler2D tA; uniform vec4 bb; uniform int mode; uniform float split; uniform float W; uniform vec3 L; uniform float selB;
       varying vec2 vxy; varying vec3 vn; varying float vr; varying vec3 vc; varying float vb;
       void main(){
-        vec2 uv = vec2((vxy.x + HALF) / (2.0 * HALF), (vxy.y + HALF) / (2.0 * HALF));
+        vec2 uv = vec2((vxy.x - bb.x) / (bb.z - bb.x), (vxy.y - bb.y) / (bb.w - bb.y));
         bool after = mode == 1 || (mode == 2 && gl_FragCoord.x > split * W);
-        vec3 img = after ? texture2D(tA, uv).rgb : texture2D(tB, uv).rgb;
+        vec4 tx = after ? texture2D(tA, uv) : texture2D(tB, uv);
+        if (tx.a < 0.5 && vr > 0.5 && vb < -0.5) discard;          // ground with no imagery for this date: leave it out
+        vec3 img = tx.a < 0.5 ? vec3(0.54, 0.54, 0.52) : tx.rgb;
         float s = 0.72 + 0.38 * max(dot(normalize(vn), L), 0.0);
         vec3 c = vr > 0.5 ? img : vc * s;
         if (selB >= 0.0 && abs(vb - selB) < 0.5) c = mix(c, vec3(1.0, 0.95, 0.4), vr > 0.5 ? 0.25 : 0.45);
@@ -187,66 +188,126 @@ function material(texB, texA){
       }`,
   });
 }
-function buildTerrain(){
-  const n = T.ng, W = T.gc * (n - 1), g = new THREE.PlaneGeometry(W, W, n - 1, n - 1), p = g.attributes.position, dem = T.dem;
-  for (let i = 0; i < p.count; i++) p.setZ(i, dem[i] - 0.15);   // PlaneGeometry rows run north to south, like the DEM
-  g.computeVertexNormals();
-  const N = p.count; g.setAttribute("aRoof", new THREE.Float32BufferAttribute(new Float32Array(N).fill(1), 1));
-  g.setAttribute("aBid", new THREE.Float32BufferAttribute(new Float32Array(N).fill(-1), 1));
-  g.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(N * 3), 3));
-  scene.add(new THREE.Mesh(g, mat));
-}
-function standing(b){ return !(b.demo && !b.demoAfter); }       // demolished before the tornado: not drawn
-function buildBuildings(){
-  const pos = [], nor = [], roof = [], bid = [], idx = [];
-  faceB = [];
-  T.buildings.forEach((b, k) => {
-    if (!standing(b)) return;
-    const R = b.ring.slice(0, -1), z0 = b.base, z1 = b.base + (b.h || 4);
-    // walls
-    for (let i = 0; i < R.length; i++){
-      const a = R[i], c = R[(i + 1) % R.length], dx = c[0] - a[0], dy = c[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = dy / L, ny = -dx / L, v = pos.length / 3;
-      pos.push(a[0], a[1], z0, c[0], c[1], z0, c[0], c[1], z1, a[0], a[1], z1);
-      for (let j = 0; j < 4; j++){ nor.push(nx, ny, 0); roof.push(0); bid.push(k); }
-      idx.push(v, v + 1, v + 2, v, v + 2, v + 3); faceB.push(k, k);
-    }
-    // roof cap
-    const v0 = pos.length / 3, tri = THREE.ShapeUtils.triangulateShape(R.map(p => new THREE.Vector2(p[0], p[1])), []);
-    for (const p of R){ pos.push(p[0], p[1], z1); nor.push(0, 0, 1); roof.push(1); bid.push(k); }
-    for (const t of tri){ idx.push(v0 + t[0], v0 + t[1], v0 + t[2]); faceB.push(k); }
+const BL = [];      // per block: {mat, terrain, bmesh, faceB, level, busy, center}
+function buildBlocks(){
+  const G = T.grid;
+  T.blocks.forEach((b, k) => {
+    const mat = blockMaterial(), W = b.x1 - b.x0, H = b.y1 - b.y0;
+    const g = new THREE.PlaneGeometry(W, H, G - 1, G - 1), p = g.attributes.position;
+    for (let i = 0; i < p.count; i++){ p.setX(i, p.getX(i) + (b.x0 + b.x1) / 2); p.setY(i, p.getY(i) + (b.y0 + b.y1) / 2); p.setZ(i, terr[k * G * G + i] - 0.2); }
+    g.computeVertexNormals(); const n = p.count;
+    g.setAttribute("aRoof", new THREE.Float32BufferAttribute(new Float32Array(n).fill(1), 1));
+    g.setAttribute("aBid", new THREE.Float32BufferAttribute(new Float32Array(n).fill(-1), 1));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
+    const tm = new THREE.Mesh(g, mat); scene.add(tm);
+    BL.push({k, b, mat, terrain:tm, bmesh:null, faceB:[], level:-1, want:0, busy:false, center:new THREE.Vector3((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, 0), tex:[]});
   });
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
-  g.setAttribute("aRoof", new THREE.Float32BufferAttribute(roof, 1)); g.setAttribute("aBid", new THREE.Float32BufferAttribute(bid, 1));
-  g.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(pos.length), 3)); g.setIndex(idx);
-  bMesh = new THREE.Mesh(g, mat); bMesh.material.side = THREE.DoubleSide; scene.add(bMesh); colorWalls();
+  // buildings, one merged mesh per block
+  const per = BL.map(() => ({pos:[], nor:[], roof:[], bid:[], idx:[], faceB:[]}));
+  T.buildings.forEach((o, k) => {
+    const A = per[o.b], R0 = [];
+    for (let i = 0; i < o.r.length; i += 2) R0.push([o.r[i], o.r[i + 1]]);
+    const Rg = R0.slice(0, -1); if (Rg.length < 3) return;
+    const z0 = o.z, z1 = o.z + (o.h || 4);
+    for (let i = 0; i < Rg.length; i++){
+      const a = Rg[i], c = Rg[(i + 1) % Rg.length], dx = c[0] - a[0], dy = c[1] - a[1], Lw = Math.hypot(dx, dy) || 1, v = A.pos.length / 3;
+      A.pos.push(a[0], a[1], z0, c[0], c[1], z0, c[0], c[1], z1, a[0], a[1], z1);
+      for (let j = 0; j < 4; j++){ A.nor.push(dy / Lw, -dx / Lw, 0); A.roof.push(0); A.bid.push(k); }
+      A.idx.push(v, v + 1, v + 2, v, v + 2, v + 3); A.faceB.push(k, k);
+    }
+    const v0 = A.pos.length / 3, tri = THREE.ShapeUtils.triangulateShape(Rg.map(p => new THREE.Vector2(p[0], p[1])), []);
+    for (const p of Rg){ A.pos.push(p[0], p[1], z1); A.nor.push(0, 0, 1); A.roof.push(1); A.bid.push(k); }
+    for (const t of tri){ A.idx.push(v0 + t[0], v0 + t[1], v0 + t[2]); A.faceB.push(k); }
+  });
+  per.forEach((A, k) => {
+    if (!A.pos.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(A.pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(A.nor, 3));
+    g.setAttribute("aRoof", new THREE.Float32BufferAttribute(A.roof, 1)); g.setAttribute("aBid", new THREE.Float32BufferAttribute(A.bid, 1));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(A.pos.length), 3)); g.setIndex(A.idx);
+    BL[k].bmesh = new THREE.Mesh(g, BL[k].mat); BL[k].faceB = A.faceB; scene.add(BL[k].bmesh);
+  });
+  colorWalls();
 }
-function wallHex(b){
+function wallHex(o){
   const m = $("wall").value;
-  if (m === "ds") return b.survey && b.survey.ds >= 0 ? DSC[b.survey.ds] : NOSURV;
-  if (m === "demo") return b.demoAfter ? DEMO : KEEP;
+  if (m === "ds") return o.s && o.s[1] >= 0 ? DSC[o.s[1]] : NOSURV;
+  if (m === "demo") return DEMOC[o.demo];
+  if (m === "src") return SRCC[o.src];
   return KEEP;
 }
 function colorWalls(){
-  const col = bMesh.geometry.attributes.color, bid = bMesh.geometry.attributes.aBid, c = new THREE.Color();
-  for (let i = 0; i < bid.count; i++){ c.setHex(wallHex(T.buildings[bid.getX(i)])); col.setXYZ(i, c.r, c.g, c.b); }
-  col.needsUpdate = true; legend();
+  const c = new THREE.Color();
+  for (const B of BL){
+    if (!B.bmesh) continue;
+    const col = B.bmesh.geometry.attributes.color, bid = B.bmesh.geometry.attributes.aBid;
+    for (let i = 0; i < bid.count; i++){ c.setHex(wallHex(T.buildings[bid.getX(i)])); col.setXYZ(i, c.r, c.g, c.b); }
+    col.needsUpdate = true;
+  }
+  legend();
 }
 function legend(){
-  const m = $("wall").value, row = (hex, l) => `<div class="row"><span class="sw" style="background:#${hex.toString(16).padStart(6, "0")}"></span>${esc(l)}</div>`;
+  const m = $("wall").value, row = (hex, l) => `<div class="row"><span class="sw" style="background:#${(+hex).toString(16).padStart(6, "0")}"></span>${esc(l)}</div>`;
   $("legend").innerHTML = m === "ds" ? "<b>Walls: observed damage</b>" + DSN.map((l, k) => row(DSC[k], l)).join("") + row(NOSURV, "not surveyed")
-    : m === "demo" ? "<b>Walls: City demolition record</b>" + row(DEMO, "demolished since May 16, 2025") + row(KEEP, "no demolition date") : "<b>Walls</b>" + row(KEEP, "all buildings");
+    : m === "demo" ? "<b>Walls: City demolition record</b>" + row(DEMOC[2], "demolished since May 16, 2025") + row(DEMOC[1], "permit filed, not completed") + row(DEMOC[0], "none recorded") + row(DEMOC[-1], "outside the City: no City data")
+    : m === "src" ? "<b>Walls: footprint source</b>" + row(SRCC[0], "City records (pre-tornado)") + row(SRCC[1], "Overture Maps 2026 (outside the City)")
+    : "<b>Walls</b>" + row(KEEP, "all buildings");
+}
+
+// ---------------------------------------------------------------- block imagery, level of detail by camera distance
+// level 0: 3x3 zoom-15 tiles into 256 px; 1: 6x6 zoom-17 (block + 1-tile margin) into 1024; 2: 10x10 zoom-18 into 2048
+const LV = [{z:15, n:1, px:256}, {z:17, n:4, px:1024}, {z:18, n:8, px:2048}], CAP = {2:4, 1:14};
+const nmHas = (e, z, x, y) => NMH[e] && NMH[e][z] && NMH[e][z].has(x + "/" + y);
+const ext = z => (NM.ext || {})[z] || "jpg";
+const MX0 = T0 => T0.lon0 * Math.PI / 180 * R, MY0 = T0 => R * Math.log(Math.tan(Math.PI / 4 + T0.lat0 * Math.PI / 360));
+async function compose(epoch, B, lv){
+  const L = LV[lv], f = 2 ** (L.z - T.zoom), x0 = B.b.x * f - 1, y0 = B.b.y * f - 1, n = L.n + 2;
+  const cv = document.createElement("canvas"); cv.width = cv.height = L.px; const g = cv.getContext("2d"), s = L.px / n;
+  const jobs = [];
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++){
+    const x = x0 + i, y = y0 + j; if (!nmHas(epoch, L.z, x, y)) continue;
+    jobs.push(getBuf(`nm/${epoch}/${L.z}/${x}/${y}.${ext(L.z)}`).then(b => createImageBitmap(new Blob([b]))).then(bmp => { g.drawImage(bmp, i * s, j * s, s, s); bmp.close(); }).catch(e => console.error(e)));
+  }
+  await Promise.all(jobs);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter;
+  const TS = WORLD / 2 ** L.z, mx0 = MX0(T), my0 = MY0(T), K = T.K;
+  const bb = new THREE.Vector4((x0 * TS - WORLD / 2 - mx0) * K, (WORLD / 2 - (y0 + n) * TS - my0) * K, ((x0 + n) * TS - WORLD / 2 - mx0) * K, (WORLD / 2 - y0 * TS - my0) * K);
+  return {t, bb};
+}
+async function setLevel(B, lv){
+  B.busy = true;
+  try {
+    const [b, a] = await Promise.all(["before", "after"].map(e => compose(e, B, lv)));
+    for (const t of B.tex) t.dispose();
+    B.tex = [b.t, a.t]; B.mat.uniforms.tB.value = b.t; B.mat.uniforms.tA.value = a.t; B.mat.uniforms.bb.value = b.bb; B.level = lv;
+  } finally { B.busy = false; }
+}
+let lodBusy = false;
+async function lod(){
+  if (lodBusy || !BL.length) return; lodBusy = true;
+  try {
+    const cam = camera.position, tgt = controls.target;
+    const d = BL.map(B => ({B, d:Math.min(cam.distanceTo(B.center), tgt.distanceTo(B.center) + cam.distanceTo(tgt) * 0.35)})).sort((a, b) => a.d - b.d);
+    const counts = {2:0, 1:0};
+    for (const {B, d: dist} of d){
+      let w = dist < 1600 ? 2 : dist < 5000 ? 1 : 0;
+      while (w > 0 && counts[w] >= CAP[w]) w--;
+      if (w > 0) counts[w]++;
+      B.want = w;
+    }
+    // one change at a time, nearest first: upgrades before downgrades
+    const next = d.find(({B}) => !B.busy && B.want > B.level) || d.slice().reverse().find(({B}) => !B.busy && B.want < B.level);
+    if (next) await setLevel(next.B, next.B.want);
+  } catch(e){ console.error(e); }
+  lodBusy = false;
 }
 
 // ---------------------------------------------------------------- imagery mode + split handle
-function setMode(m){
-  mode = m; mat.uniforms.mode.value = m;
-  document.querySelectorAll("[data-img]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.img === m)); placeSplit();
-}
+function setMode(m){ mode = m; SHARED.mode.value = m; document.querySelectorAll("[data-img]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.img === m)); placeSplit(); }
 function placeSplit(){
-  if (!mat) return;
-  const w = canvas.clientWidth; mat.uniforms.W.value = renderer.domElement.width; mat.uniforms.split.value = split;
-  $("split").hidden = mode !== 2; $("split").style.left = split * w + "px";
+  if (!renderer) return;
+  SHARED.W.value = renderer.domElement.width; SHARED.split.value = split;
+  $("split").hidden = mode !== 2; $("split").style.left = split * canvas.clientWidth + "px";
 }
 function wireSplit(){
   const h = $("split").querySelector("span"); let drag = false;
@@ -259,45 +320,49 @@ function wireSplit(){
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
 function pick(e){
   const r = canvas.getBoundingClientRect(); ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-  ray.setFromCamera(ptr, camera); const h = ray.intersectObject(bMesh)[0];
+  ray.setFromCamera(ptr, camera);
+  const meshes = BL.filter(B => B.bmesh).map(B => B.bmesh), h = ray.intersectObjects(meshes)[0];
   if (!h) return;
-  sel = faceB[h.faceIndex]; mat.uniforms.selB.value = sel; renderBuilding(T.buildings[sel]);
+  const B = BL.find(B => B.bmesh === h.object); sel = B.faceB[h.faceIndex]; SHARED.selB.value = sel; renderBuilding(T.buildings[sel]);
 }
 let down = null;
 canvas.addEventListener("pointerdown", e => down = [e.clientX, e.clientY]);
-canvas.addEventListener("pointerup", e => { if (down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 4 && bMesh) pick(e); down = null; });
+canvas.addEventListener("pointerup", e => { if (down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 4) pick(e); down = null; });
 function renderOverview(){
-  sel = -1; if (mat) mat.uniforms.selB.value = -1;
-  const st = T.buildings.filter(standing), surv = st.filter(b => b.survey && b.survey.ds >= 0);
-  const rows = [0, 1, 2, 3, 4].map(k => { const g = surv.filter(b => b.survey.ds === k), d = g.filter(b => b.demoAfter).length;
-    return `<tr><td>${DSN[k]}</td><td>${g.length}</td><td>${d}</td><td>${g.length ? Math.round(100 * d / g.length) + "%" : "–"}</td></tr>`; }).join("");
-  const un = st.filter(b => !b.survey || b.survey.ds < 0), und = un.filter(b => b.demoAfter).length;
-  $("panel").innerHTML = `<h2>${esc(S.focus.headline)}</h2><p>${esc(S.focus.intro)}</p>
-    <h3>Demolished since the tornado, by observed damage</h3>
-    <table><thead><tr><th>Observed</th><th>Buildings</th><th>Demolished</th><th>Share</th></tr></thead><tbody>${rows}
-    <tr><td>not surveyed</td><td>${un.length}</td><td>${und}</td><td>${un.length ? Math.round(100 * und / un.length) + "%" : "–"}</td></tr></tbody></table>
-    <p class="meta" style="margin-top:4px">City demolition dates through ${esc(T.lastDemo)}. Footprints wholly inside the ${2 * T.half} m square.</p>
-    <h3>What the model is</h3><p>${esc(S.focus.what)}</p>`;
+  sel = -1; SHARED.selB.value = -1;
+  const city = T.buildings.filter(o => o.src === 0), surv = city.filter(o => o.s && o.s[1] >= 0);
+  const rows = [0, 1, 2, 3, 4].map(k => { const g = surv.filter(o => o.s[1] === k), d = g.filter(o => o.demo === 2).length, f = g.filter(o => o.demo === 1).length;
+    return `<tr><td>${DSN[k]}</td><td>${g.length.toLocaleString()}</td><td>${d}</td><td>${g.length ? Math.round(100 * d / g.length) + "%" : "–"}</td><td>${f}</td></tr>`; }).join("");
+  const un = city.filter(o => !o.s || o.s[1] < 0), und = un.filter(o => o.demo === 2).length;
+  $("panel").innerHTML = `<h2>${esc(S.path3d.headline)}</h2><p>${esc(S.path3d.intro)}</p>
+    <h3>City footprints demolished since the tornado</h3>
+    <table><thead><tr><th>Observed</th><th>Buildings</th><th>Demolished</th><th>Share</th><th>Permit filed</th></tr></thead><tbody>${rows}
+    <tr><td>not surveyed</td><td>${un.length.toLocaleString()}</td><td>${und}</td><td>${un.length ? Math.round(100 * und / un.length) + "%" : "–"}</td><td>${un.filter(o => o.demo === 1).length}</td></tr></tbody></table>
+    <p class="meta" style="margin-top:4px">${esc(S.path3d.tableNote)}</p>
+    <h3>What the model is</h3><p>${esc(S.path3d.what)}</p>`;
 }
-function renderBuilding(b){
-  const s = b.survey;
+function renderBuilding(o){
+  const s = o.s;
   $("panel").innerHTML = `<p><button class="back" id="bk" type="button">← Overview</button></p>
-    <h2>${s && s.ds >= 0 ? DSN[s.ds] : "Not surveyed"}</h2>
+    <h2>${s && s[1] >= 0 ? DSN[s[1]] : "Not surveyed"}</h2>
     <dl class="kv">
-      ${s ? `<dt>Survey</dt><dd>${esc(S.surveys[s.src])}</dd><dt>Archetype</dt><dd>T${s.arch}</dd><dt>NWS EF zone</dt><dd>${s.ef >= 0 ? "EF" + s.ef : "–"}</dd><dt>Year built</dt><dd>${s.yb ?? "–"}</dd>` : ""}
-      <dt>Height (City)</dt><dd>${b.h ? b.h.toFixed(1) + " m" : "unknown, drawn at 4 m"}</dd>
-      <dt>Roof form</dt><dd>${esc(b.roof || "–")}</dd>
-      <dt>Floor area</dt><dd>${b.sqft ? Math.round(b.sqft).toLocaleString() + " sq ft" : "–"}</dd>
-      <dt>Neighborhood</dt><dd>${esc(b.nhd || "–")}</dd>
-      <dt>City demolition</dt><dd>${b.demo ? esc(b.demo) + (b.demoAfter ? " (after the tornado)" : "") : "none recorded"}</dd>
+      ${s ? `<dt>Survey</dt><dd>${esc(S.surveys[s[5]])}</dd><dt>Archetype</dt><dd>T${s[2]}</dd><dt>NWS EF zone</dt><dd>${s[3] >= 0 ? "EF" + s[3] : "–"}</dd><dt>Year built</dt><dd>${s[4] ?? "–"}</dd>` : ""}
+      <dt>Footprint</dt><dd>${o.src === 0 ? "City records (pre-tornado)" : "Overture Maps 2026" + (o.osrc ? " (" + esc(o.osrc) + ")" : "")}</dd>
+      <dt>Height</dt><dd>${o.h ? o.h.toFixed(1) + " m" : "unknown, drawn at 4 m"}</dd>
+      <dt>Roof form</dt><dd>${esc(o.roof || "–")}</dd>
+      ${o.sqft ? `<dt>Floor area</dt><dd>${Math.round(o.sqft).toLocaleString()} sq ft</dd>` : ""}
+      ${o.nhd ? `<dt>Neighborhood</dt><dd>${esc(o.nhd)}</dd>` : ""}
+      <dt>City demolition</dt><dd>${o.demo === -1 ? "outside the City (no City data)" : o.demo === 2 ? "demolished since the tornado (" + esc(o.demoDate) + ")" : o.demo === 1 ? "permit filed " + esc(o.demoDate) + ", not completed" : "none recorded"}</dd>
     </dl>`;
   $("bk").onclick = renderOverview;
 }
 
 // ---------------------------------------------------------------- views
 function view(v){
-  const t = new THREE.Vector3(0, 0, 0), d = {oblique:[0.35, -0.75, 0.62, 900], top:[0.001, -0.001, 1, 1300], street:[0.2, -0.95, 0.12, 380]}[v];
-  controls.target.copy(t); camera.position.set(d[0], d[1], d[2]).normalize().multiplyScalar(d[3]); controls.update();
+  const f = T.focus, xs = T.blocks.flatMap(b => [b.x0, b.x1]), ys = T.blocks.flatMap(b => [b.y0, b.y1]);
+  const c = new THREE.Vector3((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2, 0);
+  const V = {path:[c, [0.03, -0.4, 0.92], 21000], core:[new THREE.Vector3(f[0], f[1], 0), [0.35, -0.75, 0.62], 1100], low:[new THREE.Vector3(f[0], f[1], 0), [0.2, -0.95, 0.14], 420]}[v];
+  controls.target.copy(V[0]); camera.position.copy(V[0]).add(new THREE.Vector3(...V[1]).normalize().multiplyScalar(V[2])); controls.update();
 }
 
 // ---------------------------------------------------------------- boot
@@ -305,24 +370,24 @@ function report(what, e){ const pre = document.createElement("pre"); pre.textCon
 async function boot(){
   try {
     statusEl.textContent = "Loading model…";
-    [S, T] = await Promise.all([getJSON("site.json"), getJSON("f3d.json")]);
-    T.dem = new Float32Array(await getBuf("f3d_terrain.bin"));
-    T.lastDemo = T.buildings.map(b => b.demo).filter(Boolean).sort().pop() || "–";
+    [S, T] = await Promise.all([getJSON("site.json"), getJSON("path3d.json")]);
+    terr = new Float32Array(await getBuf("path3d_terrain.bin"));
     try { NM = await getJSON("nearmap_meta.json"); } catch(e){ NM = null; }
     if (!NM) throw new Error("This build has no aerial imagery, which the 3D view needs.");
-    document.title = S.site.short + " 3D"; $("title").textContent = S.focus.title; $("subtitle").textContent = S.focus.sub;
-    $("meta").textContent = `ground: ${T.lidar.split(" (")[0]} · footprints: City assessor · built ${T.generated}`;
-    $("about").innerHTML = S.focus.about.map(t => `<p>${esc(t)}</p>`).join("");
+    for (const [e, m] of Object.entries(NM.epochs)){ NMH[e] = {}; for (const [z, l] of Object.entries(m.tiles)) NMH[e][z] = new Set(l.map(([x, y]) => x + "/" + y)); }
+    document.title = S.site.short + " 3D"; $("title").textContent = S.path3d.title; $("subtitle").textContent = S.path3d.sub;
+    $("meta").textContent = `${T.buildings.length.toLocaleString()} buildings · ground: USGS 3DEP · built ${T.generated}`;
+    $("about").innerHTML = S.path3d.about.map(t => `<p>${esc(t)}</p>`).join("");
     $("lb").textContent = "Before · " + NM.epochs.before.date; $("la").textContent = "After · " + NM.epochs.after.date;
-    setup();
-    const [tb, ta] = await Promise.all([getTex("nm/focus/before.jpg"), getTex("nm/focus/after.jpg")]);
-    mat = material(tb, ta);
-    buildTerrain(); buildBuildings(); view("oblique"); setMode(2); wireSplit(); renderOverview();
+    setup(); buildBlocks();
+    await Promise.all(BL.map(B => setLevel(B, 0)));
+    view("core"); setMode(2); wireSplit(); renderOverview();
     statusEl.hidden = true;
     $("wall").onchange = colorWalls;
     document.querySelectorAll("[data-img]").forEach(b => b.onclick = () => setMode(+b.dataset.img));
     document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => view(b.dataset.view));
     $("forget").onclick = async () => { if (FORGET) await FORGET(); location.reload(); };
+    setInterval(lod, 250);
   } catch(e){ report("the 3D model", e); return; }
   (function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
 }
