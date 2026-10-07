@@ -13,7 +13,7 @@
 :root{
   --bg:#f1f3f5; --surface:#ffffff; --ink:#18202a; --ink-2:#465262; --muted:#6c7888; --line:#d9dfe6; --grid:#eceff3;
   --accent:#1e5f8e; --accent-soft:#e2edf6; --warn:#a86a00; --ring:#ffffff;
-  /* damage states: DS0 neutral, DS1-4 one ordinal hue (validated, light) */
+  /* damage states: DS0 neutral, DS1-4 one ordinal hue; on dark the ramps run dark->light so more damage stands out (both validated) */
   --ds0:#a8a69f; --ds1:#ec9560; --ds2:#d9652f; --ds3:#b03d18; --ds4:#6e1a0a;
   /* EF zones: one sequential blue */
   --ef0:#b7d3f6; --ef1:#6da7ec; --ef2:#2a78d6; --ef3:#104281;
@@ -26,12 +26,16 @@
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){ --bg:#0e1216; --surface:#161c22; --ink:#e7ecf1; --ink-2:#b3bdc8; --muted:#8793a0; --line:#28313a; --grid:#1f262e;
     --accent:#7fb6e0; --accent-soft:#1b2833; --warn:#e2a93a; --ring:#11161c;
-    --ds0:#77756e; --ds1:#f7c4a2; --ds2:#ef9563; --ds3:#de6331; --ds4:#b8441c; --r0:#5a5955;
+    --ds0:#77756e; --ds1:#b8441c; --ds2:#de6331; --ds3:#ef9563; --ds4:#f7c4a2;
+    --ef0:#1c5cab; --ef1:#2a78d6; --ef2:#5598e7; --ef3:#9ec5f4;
+    --rn3:#9ec5f4; --rn2:#3987e5; --rn1:#1c5cab; --r0:#5a5955; --rp1:#9e2323; --rp2:#e34948; --rp3:#f2a7a0;
     --s1:#3987e5; --s2:#d95926; color-scheme:dark; }
 }
 :root[data-theme="dark"]{ --bg:#0e1216; --surface:#161c22; --ink:#e7ecf1; --ink-2:#b3bdc8; --muted:#8793a0; --line:#28313a; --grid:#1f262e;
   --accent:#7fb6e0; --accent-soft:#1b2833; --warn:#e2a93a; --ring:#11161c;
-  --ds0:#77756e; --ds1:#f7c4a2; --ds2:#ef9563; --ds3:#de6331; --ds4:#b8441c; --r0:#5a5955;
+  --ds0:#77756e; --ds1:#b8441c; --ds2:#de6331; --ds3:#ef9563; --ds4:#f7c4a2;
+    --ef0:#1c5cab; --ef1:#2a78d6; --ef2:#5598e7; --ef3:#9ec5f4;
+    --rn3:#9ec5f4; --rn2:#3987e5; --rn1:#1c5cab; --r0:#5a5955; --rp1:#9e2323; --rp2:#e34948; --rp3:#f2a7a0;
   --s1:#3987e5; --s2:#d95926; color-scheme:dark; }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
