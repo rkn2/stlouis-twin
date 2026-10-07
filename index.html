@@ -155,7 +155,10 @@ let KEY = null, FORGET = null;
 const DATA = "data/";
 async function getBuf(name){
   const url = DATA + name + (KEY ? ".enc" : "");
-  const res = await fetch(url);
+  let res = await fetch(url);
+  // GitHub Pages answers the odd burst of tile requests with a transient 503 (seen 2026-10-07; the same file
+  // returned 200 a moment later), so retry a 5xx once and say so in the console
+  if (res.status >= 500){ console.warn(`${url}: HTTP ${res.status}, retrying once`); await new Promise(r => setTimeout(r, 600)); res = await fetch(url); }
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
   const buf = await res.arrayBuffer();
   if (!KEY) return buf;
@@ -313,7 +316,8 @@ async function closeup(epoch, lat, lon, cv){
   await Promise.all([...Array((x1 - x0 + 1) * (y1 - y0 + 1)).keys()].map(async i => {
     const x = x0 + i % (x1 - x0 + 1), y = y0 + Math.floor(i / (x1 - x0 + 1));
     if (!nmHas(epoch, z, x, y)) return;
-    const bmp = await createImageBitmap(new Blob([await getBuf(`nm/${epoch}/${z}/${x}/${y}.jpg`)], {type:"image/jpeg"}));
+    let buf; try { buf = await getBuf(`nm/${epoch}/${z}/${x}/${y}.jpg`); } catch(e){ console.error(e); return; }   // draw the rest of the close-up
+    const bmp = await createImageBitmap(new Blob([buf], {type:"image/jpeg"}));
     g.drawImage(bmp, (x * 256 - fx + half) * k, (y * 256 - fy + half) * k, 256 * k, 256 * k); drew++;
   }));
   if (!drew){ g.fillStyle = css("--muted"); g.font = "13px system-ui"; g.textAlign = "center"; g.fillText("no capture here", S / 2, S / 2); return false; }
