@@ -88,11 +88,6 @@ dl.kv dt{color:var(--muted)} dl.kv dd{margin:0}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-bottom:6px}
 .seg button{border:0;background:var(--surface);color:var(--ink-2);font:inherit;font-size:12px;padding:3px 9px;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
-.swipe{position:absolute;top:0;bottom:0;width:0;z-index:650;pointer-events:none}
-.swipe::before{content:"";position:absolute;top:0;bottom:0;left:-1px;width:2px;background:#fff;box-shadow:0 0 4px rgba(0,0,0,.6)}
-.swipe input{pointer-events:auto;position:absolute;top:50%;left:-14px;width:28px;height:28px;margin:0;opacity:0;cursor:ew-resize}
-.swipe span{position:absolute;top:calc(50% - 14px);left:-14px;width:28px;height:28px;border-radius:50%;background:#fff;color:#18202a;display:grid;place-items:center;font:700 13px var(--sans);box-shadow:0 1px 4px rgba(0,0,0,.4)}
-.swipe b{position:absolute;top:8px;font:600 11.5px var(--sans);color:#fff;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px;white-space:nowrap}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
 .pair figure{margin:0}.pair canvas{width:100%;aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--grid);display:block}
 .pair figcaption{font-size:11.5px;color:var(--muted);margin-top:2px}
@@ -101,6 +96,11 @@ details.about{background:var(--surface);border:1px solid var(--line);border-radi
 details.about summary{cursor:pointer;font-weight:600}
 details.about p{color:var(--ink-2);max-width:900px}
 a{color:var(--accent)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line)}
+.tabs a{padding:7px 16px;font-weight:600;font-size:14px;color:var(--ink-2);text-decoration:none;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink);background:var(--surface)}
+.tabs a[aria-current="page"]{color:var(--ink);background:var(--surface);border-color:var(--line)}
+
 #status{padding:20px;color:var(--muted)}
 #status pre{white-space:pre-wrap;color:var(--warn);font:12px var(--mono)}
 #gate{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:5000;padding:16px}
@@ -119,6 +119,10 @@ a{color:var(--accent)}
     </div>
     <div class="meta" id="meta"></div>
   </header>
+  <nav class="tabs" aria-label="Views">
+    <a href="./" aria-current="page">Map</a>
+    <a href="3d.html">3D</a>
+  </nav>
   <div class="controls" role="group" aria-label="Layers">
     <label class="chip">Buildings <select id="color" aria-label="Color buildings by">
       <option value="ds">observed damage</option>
@@ -128,7 +132,7 @@ a{color:var(--accent)}
       <option value="demo">demolished since the tornado</option>
     </select></label>
     <label class="chip" id="imgChip" hidden>Imagery <select id="img" aria-label="Aerial imagery">
-      <option value="off">off</option><option value="before">before</option><option value="after">after</option><option value="swipe">before | after swipe</option>
+      <option value="off">off</option><option value="before">before</option><option value="after">after</option>
     </select></label>
     <label class="chip"><input type="checkbox" id="lyrB" checked> Surveyed buildings</label>
     <label class="chip"><input type="checkbox" id="lyrEF" checked> NWS EF zones</label>
@@ -270,7 +274,7 @@ function setBase(){   // Esri canvas tiles need no key or referrer (the page sen
 }
 
 // ---------------------------------------------------------------- licensed aerial imagery (encrypted tiles, if this build has them)
-let NM = null, NMH = {}, nmLayers = {}, swipeEl = null;
+let NM = null, NMH = {}, nmLayers = {};
 const nmHas = (e, z, x, y) => NMH[e] && NMH[e][z] && NMH[e][z].has(x + "/" + y);
 const EncTiles = L.GridLayer.extend({
   createTile(c, done){
@@ -292,33 +296,12 @@ function initImagery(){
   }
   const d = (e) => new Date(NM.epochs[e].date + "T12:00").toLocaleDateString(undefined, {month:"short", day:"numeric", year:"numeric"});
   $("img").options[1].text = "before (" + d("before") + ")"; $("img").options[2].text = "after (" + d("after") + ")";
-  swipeEl = L.DomUtil.create("div", "swipe", map.getContainer()); swipeEl.hidden = true;
-  swipeEl.innerHTML = `<b style="right:10px">${esc(d("before"))}</b><b style="left:10px">${esc(d("after"))}</b><span aria-hidden="true">⇔</span><input type="range" min="0" max="1000" value="500" aria-label="Swipe between before and after">`;
-  L.DomEvent.disableClickPropagation(swipeEl);
-  let drag = false; const sp = swipeEl.querySelector("span"), rng = swipeEl.querySelector("input");
-  const setX = x => { const w = map.getSize().x; swipeEl.dataset.f = Math.min(0.98, Math.max(0.02, x / w)); clip(); };
-  sp.style.pointerEvents = "auto"; sp.style.cursor = "ew-resize";
-  sp.onpointerdown = e => { drag = true; sp.setPointerCapture(e.pointerId); map.dragging.disable(); };
-  sp.onpointermove = e => { if (drag) setX(e.clientX - map.getContainer().getBoundingClientRect().left); };
-  sp.onpointerup = () => { drag = false; map.dragging.enable(); };
-  rng.oninput = () => setX(rng.value / 1000 * map.getSize().x);
-  swipeEl.dataset.f = 0.5;
-  map.on("move zoom resize", clip);
   $("imgChip").hidden = false; $("img").onchange = setImagery;
-}
-function clip(){
-  if (!swipeEl) return;
-  const pane = map.getPane("nm_after");
-  if ($("img").value !== "swipe"){ pane.style.clip = ""; swipeEl.hidden = true; return; }
-  const sz = map.getSize(), x = +swipeEl.dataset.f * sz.x, nw = map.containerPointToLayerPoint([0, 0]), se = map.containerPointToLayerPoint(sz);
-  pane.style.clip = `rect(${nw.y}px, ${se.x}px, ${se.y}px, ${nw.x + x}px)`;    // "after" shows right of the divider
-  swipeEl.hidden = false; swipeEl.style.left = x + "px";
 }
 function setImagery(){
   const v = $("img").value;
-  for (const [e, ls] of Object.entries(nmLayers)) for (const l of ls) (v === e || v === "swipe") ? l.addTo(map) : l.remove();
+  for (const [e, ls] of Object.entries(nmLayers)) for (const l of ls) v === e ? l.addTo(map) : l.remove();
   if (v !== "off" && map.getZoom() < 15) map.setZoom(15);
-  clip();
 }
 // before/after close-up around one point: decrypt the covering tiles and draw a 120 m square
 async function closeup(epoch, lat, lon, cv){
@@ -356,7 +339,6 @@ function renderOverview(){
       <div class="stat"><b>${rated.toLocaleString()}</b><span>with a damage state</span></div>
       <div class="stat"><b>${G.lat.length.toLocaleString()}</b><span>unsurveyed pre-1950 parcels</span></div>
     </div>
-    ${NM ? `<p style="margin:12px 0 0"><a href="3d.html">${esc(S.threeD)} →</a></p>` : ""}
     <h3>Twin loop status</h3>
     <ol class="loop">${S.loop.map(s => `<li><span class="ic ${s.state}" aria-hidden="true">${{done:"✓", blocked:"!", started:"◐"}[s.state] || "–"}</span><div><b>${esc(s.stage)}</b> <span class="meta">${{done:"in place", blocked:"blocked", started:"started"}[s.state] || "not started"}</span><p>${esc(s.text)}</p></div></li>`).join("")}</ol>
     <h3>Recovery: demolished since the tornado</h3>

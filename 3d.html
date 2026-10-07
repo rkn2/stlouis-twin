@@ -57,15 +57,16 @@ dl.kv dt{color:var(--muted)} dl.kv dd{margin:0}
 .legend b{display:block;font-weight:600;margin-bottom:4px}
 .legend .row{display:flex;align-items:center;gap:6px}
 .sw{width:11px;height:11px;border-radius:2px;flex:none}
-.split{position:absolute;top:0;bottom:0;width:0;z-index:5;pointer-events:none}
-.split::before{content:"";position:absolute;top:0;bottom:0;left:-1px;width:2px;background:#fff;box-shadow:0 0 4px rgba(0,0,0,.6)}
-.split span{pointer-events:auto;cursor:ew-resize;position:absolute;top:calc(50% - 14px);left:-14px;width:28px;height:28px;border-radius:50%;background:#fff;color:#18202a;display:grid;place-items:center;font:700 13px var(--sans);box-shadow:0 1px 4px rgba(0,0,0,.4);touch-action:none}
-.split b{position:absolute;top:8px;font:600 11.5px var(--sans);color:#fff;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px;white-space:nowrap}
 .hint{position:absolute;right:10px;bottom:10px;font:11.5px var(--sans);color:#d5dbe1;background:rgba(0,0,0,.45);padding:3px 8px;border-radius:4px}
 details.about{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 16px}
 details.about summary{cursor:pointer;font-weight:600}
 details.about p{color:var(--ink-2);max-width:900px}
 a{color:var(--accent)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line)}
+.tabs a{padding:7px 16px;font-weight:600;font-size:14px;color:var(--ink-2);text-decoration:none;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink);background:var(--surface)}
+.tabs a[aria-current="page"]{color:var(--ink);background:var(--surface);border-color:var(--line)}
+
 #status{position:absolute;inset:0;display:grid;place-items:center;color:#c9d1d9;font-size:13px}
 #status pre{white-space:pre-wrap;color:#e2a93a;font:12px var(--mono);max-width:90%}
 #gate{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:5000;padding:16px}
@@ -87,11 +88,14 @@ a{color:var(--accent)}
     </div>
     <div class="meta" id="meta"></div>
   </header>
+  <nav class="tabs" aria-label="Views">
+    <a href="./">Map</a>
+    <a href="3d.html" aria-current="page">3D</a>
+  </nav>
   <div class="controls">
     <div class="seg" role="group" aria-label="Imagery">
-      <button type="button" data-img="0" aria-pressed="false">Before</button>
-      <button type="button" data-img="1" aria-pressed="false">After</button>
-      <button type="button" data-img="2" aria-pressed="true">Swipe</button>
+      <button type="button" data-img="0" aria-pressed="false">Before (Mar 2, 2025)</button>
+      <button type="button" data-img="1" aria-pressed="true">After (May 17, 2025)</button>
     </div>
     <label class="chip">Walls <select id="wall" aria-label="Color walls by">
       <option value="ds">observed damage</option>
@@ -104,12 +108,10 @@ a{color:var(--accent)}
       <button type="button" data-view="core">EF3 core</button>
       <button type="button" data-view="low">Low, close</button>
     </div>
-    <a class="chip" href="./">← Map of the whole path</a>
   </div>
   <main>
     <div class="stage" id="stage">
       <canvas id="c" aria-label="3D model"></canvas>
-      <div class="split" id="split" hidden><b id="lb" style="right:10px"></b><b id="la" style="left:10px"></b><span aria-hidden="true">⇔</span></div>
       <div class="legend" id="legend"></div>
       <div class="hint">drag to orbit · right-drag to pan · scroll to zoom · click a building · imagery sharpens as you move in</div>
       <div id="status">Loading…</div>
@@ -151,7 +153,7 @@ const DSN = ["DS0 none", "DS1 slight", "DS2 moderate", "DS3 extensive", "DS4 com
 const DSC = [0xa8a69f, 0xec9560, 0xd9652f, 0xb03d18, 0x6e1a0a], NOSURV = 0xd8d6cf, KEEP = 0xc9c7bf;
 const DEMOC = {2:0xd03b3b, 1:0xfab219, 0:0xc9c7bf, "-1":0x8fa3b8}, SRCC = {0:0xc9c7bf, 1:0x8fa3b8};
 
-let S, T, NM, renderer, scene, camera, controls, NMH = {}, mode = 2, split = 0.5, sel = -1, terr;
+let S, T, NM, renderer, scene, camera, controls, NMH = {}, mode = 1, sel = -1, terr;
 const canvas = $("c"), statusEl = $("status");
 const R = 6378137, WORLD = 2 * Math.PI * R;
 
@@ -162,21 +164,21 @@ function setup(){
   camera = new THREE.PerspectiveCamera(40, 1, 2, 60000); camera.up.set(0, 0, 1);
   controls = new OrbitControls(camera, canvas); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 25; controls.maxDistance = 25000;
   controls.screenSpacePanning = false;
-  const resize = () => { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); placeSplit(); };
+  const resize = () => { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
   new ResizeObserver(resize).observe(canvas); resize();
 }
 const GRAY = new THREE.DataTexture(new Uint8Array([138, 138, 134, 0]), 1, 1); GRAY.needsUpdate = true;
-const SHARED = {mode:{value:2}, split:{value:0.5}, W:{value:1}, selB:{value:-1}, L:{value:new THREE.Vector3(-0.4, -0.5, 0.77).normalize()}};
+const SHARED = {mode:{value:1}, selB:{value:-1}, L:{value:new THREE.Vector3(-0.4, -0.5, 0.77).normalize()}};
 function blockMaterial(){
   return new THREE.ShaderMaterial({
     uniforms:{tB:{value:GRAY}, tA:{value:GRAY}, bb:{value:new THREE.Vector4(0, 0, 1, 1)}, ...SHARED}, side:THREE.DoubleSide,
     vertexShader:`attribute float aRoof; attribute float aBid; attribute vec3 color; varying vec2 vxy; varying vec3 vn; varying float vr; varying vec3 vc; varying float vb;
       void main(){ vxy = position.xy; vn = normal; vr = aRoof; vc = color; vb = aBid; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader:`uniform sampler2D tB; uniform sampler2D tA; uniform vec4 bb; uniform int mode; uniform float split; uniform float W; uniform vec3 L; uniform float selB;
+    fragmentShader:`uniform sampler2D tB; uniform sampler2D tA; uniform vec4 bb; uniform int mode; uniform vec3 L; uniform float selB;
       varying vec2 vxy; varying vec3 vn; varying float vr; varying vec3 vc; varying float vb;
       void main(){
         vec2 uv = vec2((vxy.x - bb.x) / (bb.z - bb.x), (vxy.y - bb.y) / (bb.w - bb.y));
-        bool after = mode == 1 || (mode == 2 && gl_FragCoord.x > split * W);
+        bool after = mode == 1;
         vec4 tx = after ? texture2D(tA, uv) : texture2D(tB, uv);
         if (tx.a < 0.5 && vr > 0.5 && vb < -0.5) discard;          // ground with no imagery for this date: leave it out
         vec3 img = tx.a < 0.5 ? vec3(0.54, 0.54, 0.52) : tx.rgb;
@@ -302,19 +304,8 @@ async function lod(){
   lodBusy = false;
 }
 
-// ---------------------------------------------------------------- imagery mode + split handle
-function setMode(m){ mode = m; SHARED.mode.value = m; document.querySelectorAll("[data-img]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.img === m)); placeSplit(); }
-function placeSplit(){
-  if (!renderer) return;
-  SHARED.W.value = renderer.domElement.width; SHARED.split.value = split;
-  $("split").hidden = mode !== 2; $("split").style.left = split * canvas.clientWidth + "px";
-}
-function wireSplit(){
-  const h = $("split").querySelector("span"); let drag = false;
-  h.onpointerdown = e => { drag = true; h.setPointerCapture(e.pointerId); controls.enabled = false; };
-  h.onpointermove = e => { if (!drag) return; const r = canvas.getBoundingClientRect(); split = Math.min(0.98, Math.max(0.02, (e.clientX - r.left) / r.width)); placeSplit(); };
-  h.onpointerup = () => { drag = false; controls.enabled = true; };
-}
+// ---------------------------------------------------------------- imagery date
+function setMode(m){ mode = m; SHARED.mode.value = m; document.querySelectorAll("[data-img]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.img === m)); }
 
 // ---------------------------------------------------------------- picking + panel
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
@@ -378,10 +369,9 @@ async function boot(){
     document.title = S.site.short + " 3D"; $("title").textContent = S.path3d.title; $("subtitle").textContent = S.path3d.sub;
     $("meta").textContent = `${T.buildings.length.toLocaleString()} buildings · ground: USGS 3DEP · built ${T.generated}`;
     $("about").innerHTML = S.path3d.about.map(t => `<p>${esc(t)}</p>`).join("");
-    $("lb").textContent = "Before · " + NM.epochs.before.date; $("la").textContent = "After · " + NM.epochs.after.date;
     setup(); buildBlocks();
     await Promise.all(BL.map(B => setLevel(B, 0)));
-    view("core"); setMode(2); wireSplit(); renderOverview();
+    view("core"); setMode(1); renderOverview();
     statusEl.hidden = true;
     $("wall").onchange = colorWalls;
     document.querySelectorAll("[data-img]").forEach(b => b.onclick = () => setMode(+b.dataset.img));
